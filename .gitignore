@@ -1,0 +1,76 @@
+# .gitignore for AffiniSecurity WAF
+
+# .NET (Backend)
+[Bb]in/
+[Oo]bj/
+*.user
+*.userosscache
+*.sln.docstates
+.vs/
+backend/.vs/
+backend/bin/
+backend/obj/
+
+# Node/React (Frontend)
+frontend/node_modules/
+frontend/dist/
+frontend/.DS_Store
+node_modules/
+dist/
+
+# OS/System
+.DS_Store
+Thumbs.db
+.gemini/
+.antigravity/
+
+# Secrets/Local Config
+*.json.user
+token.txt
+login_resp.json
+rules_resp.json
+response.json
+test_export.json
+*.local
+
+# Build/Logs
+build_log.txt
+build_log_retry.txt
+curl_out.txt
+
+# Artifacts
+scratch/
+1walkthrough.md
+loginwalkthrough.md
+rolewalkthrough.md
+walkthrough.md
+implementation_plan.md
+waf_regression_audit.md
+phd_research_proposal.md
+phd_thesis_viability.md
+adaptive_contextual_security.md
+ai_security_deep_dive.md
+technical_proposal.md
+industry_standards_ai_security.md
+ACS_Development_Blueprint.md
+security_and_architecture_assessment.md
+system_study.md
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+*,cover
+.hypothesis/

@@ -1,0 +1,110 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    --primary: 217 85% 29%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 217 85% 29%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 25 76% 18%;
+
+    --success: 142 76% 36%;
+    --success-foreground: 355 100% 100%;
+
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 217 85% 29%;
+    --radius: 0.75rem;
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 222 47% 11%;
+    --sidebar-primary: 217 85% 29%;
+    --sidebar-primary-foreground: 210 40% 98%;
+    --sidebar-accent: 210 40% 96.1%;
+    --sidebar-accent-foreground: 222.2 47.4% 11.2%;
+    --sidebar-border: 214.3 31.8% 91.4%;
+    --sidebar-ring: 217 85% 29%;
+
+    --font-sans: 'Inter', system-ui, sans-serif;
+    --font-heading: 'Outfit', sans-serif;
+
+    --glow-primary: 0 4px 14px hsl(217 85% 29% / 0.15);
+  }
+
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-sans);
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: var(--font-sans);
+  }
+
+  code, .font-mono {
+    font-family: var(--font-mono);
+  }
+}
+
+@layer components {
+  .glow-primary {
+    box-shadow: var(--glow-primary);
+  }
+  .glow-destructive {
+    box-shadow: var(--glow-destructive);
+  }
+  .glow-success {
+    box-shadow: var(--glow-success);
+  }
+  .stat-card {
+    @apply bg-card border border-border rounded-lg p-5 transition-all duration-200;
+  }
+  .stat-card:hover {
+    border-color: hsl(var(--primary) / 0.3);
+    box-shadow: var(--glow-primary);
+  }
+  .data-text {
+    font-family: var(--font-mono);
+    @apply text-sm tracking-wider;
+  }
+  .brand-logo {
+    filter: drop-shadow(0 2px 8px rgba(11, 59, 138, 0.25));
+    @apply transition-transform duration-300 hover:scale-[1.02];
+  }
+}

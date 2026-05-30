@@ -1,0 +1,21 @@
+
+> vite_react_shadcn_ts@0.0.0 dev
+> vite
+
+
+  VITE v5.4.19  ready in 241 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: http://172.20.10.3:5173/
+Browserslist: browsers data (caniuse-lite) is 11 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+8:52:35 PM [vite] hmr update /src/pages/BotProtectionPage.tsx, /src/index.css
+8:52:55 PM [vite] hmr update /src/pages/BotProtectionPage.tsx, /src/index.css
+12:19:19 PM [vite] vite.config.ts changed, restarting server...
+12:19:19 PM [vite] server restarted.
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: http://10.5.80.244:5173/
+2:31:40 PM [vite] hmr update /src/pages/BotProtectionPage.tsx, /src/index.css
+2:32:14 PM [vite] hmr update /src/pages/BotProtectionPage.tsx, /src/index.css

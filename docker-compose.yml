@@ -1,0 +1,100 @@
+services:
+  coraza-waf:
+    image: ghcr.io/coreruleset/coraza-crs:caddy-alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - BACKEND=api-dotnet:8080
+      - CORAZA_AUDIT_ENGINE=RelevantOnly
+      - CORAZA_AUDIT_LOG=/var/log/coraza/audit.log
+      - CORAZA_AUDIT_LOG_FORMAT=JSON
+      - CORAZA_AUDIT_LOG_TYPE=Serial
+    entrypoint: [ "caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile" ]
+    volumes:
+      - ./backend/caddy/Caddyfile:/etc/caddy/Caddyfile
+      - ./backend/caddy:/opt/coraza/config
+      - ./backend/owasp-rules/rules:/opt/coraza/owasp-crs/rules:ro
+      - ./frontend/dist:/srv:ro
+      - coraza_logs:/var/log/coraza
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - api-dotnet
+
+  log-shipper:
+    image: natsio/nats-box:latest
+    restart: always
+    volumes:
+      - coraza_logs:/var/log/coraza:ro
+    depends_on:
+      - nats
+    entrypoint: [ "/bin/sh", "-c" ]
+    command:
+      - |
+        echo "Starting log shipper..."
+        tail -F /var/log/coraza/audit.log | while read -r line; do
+          nats pub waf.logs.audit "$$line" -s nats://nats:4222
+        done
+
+  api-dotnet:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      
+    restart: always
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Host=postgres-primary;Database=waf;Username=waf_app_user;Password=WafSecurePass2026!
+      - Waf__RedisUrl=redis:6379
+      - Waf__NatsUrl=nats://nats:4222
+      - Waf__JwtSecret=AFFINI_SECURE_WAF_KEY_2026_PROD_REPLACE_ME_NOW_
+      - Waf__AllowedOrigins=http://localhost:80,http://localhost:443
+    volumes:
+      - ./backend/owasp-rules/rules:/opt/coraza/owasp-crs/rules:rw
+      - coraza_logs:/var/log/coraza:ro
+      - ./backend/wwwroot:/app/wwwroot
+      - ./backend/caddy:/app/caddy
+    ports:
+      - "5001:8080"
+    depends_on:
+      - postgres-primary
+      - redis
+      - nats
+
+  postgres-primary:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=secret
+      - POSTGRES_DB=waf
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  nats:
+    image: nats:latest
+    ports:
+      - "8222:8222"
+      - "4222:4222"
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+volumes:
+  pg_data:
+  coraza_logs:

@@ -1,0 +1,20 @@
+{
+    order coraza_waf first
+    admin 0.0.0.0:2019
+}
+
+:80, :443 {
+    @api path /api/*
+    handle @api {
+        reverse_proxy api-dotnet:8080
+    }
+    coraza_waf {
+        directives `
+            Include /opt/coraza/config/coraza.conf
+            Include /opt/coraza/config/crs-setup.conf
+            Include /opt/coraza/config/tenant-rules.conf
+        `
+    }
+    
+    import /opt/coraza/config/tenant-routes.caddy
+}

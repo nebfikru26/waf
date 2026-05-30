@@ -1,0 +1,373 @@
+# --- DYNAMIC TENANT ROUTES ---
+# Generated automatically. Do not edit manually.
+
+# Route for Domain: marelitsolutions.com
+@h_834d67b4a8dd4bd39be811c15ed8840c host marelitsolutions.com
+handle @h_834d67b4a8dd4bd39be811c15ed8840c {
+    reverse_proxy 213.55.96.5 {
+        header_up Host {http.request.host}
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+# Route for Domain: mu.edu.et
+@h_0d4f622439a64e6d8f34b88f4962f6f3 host mu.edu.et
+handle @h_0d4f622439a64e6d8f34b88f4962f6f3 {
+    reverse_proxy 213.55.96.6 {
+        header_up Host {http.request.host}
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+# Route for Domain: affinisecurity.ai
+@ua_138bba197520491f89bb0367eb4fe979 {
+    host affinisecurity.ai
+    not header Cookie *affini_clearance=*
+    not path /api/waf/verify
+}
+handle @ua_138bba197520491f89bb0367eb4fe979 {
+    rewrite * /api/waf/challenge?domain=affinisecurity.ai&target={uri}
+    reverse_proxy api-dotnet:8080 {
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+@v_138bba197520491f89bb0367eb4fe979 {
+    host affinisecurity.ai
+    path /api/waf/verify
+}
+handle @v_138bba197520491f89bb0367eb4fe979 {
+    reverse_proxy api-dotnet:8080
+}
+@h_138bba197520491f89bb0367eb4fe979 host affinisecurity.ai
+handle @h_138bba197520491f89bb0367eb4fe979 {
+    reverse_proxy 213.55.96.7 {
+        header_up Host {http.request.host}
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+# Route for Domain: helu.com
+@h_f4ebb6059ff6432cb2841a933ce7fb51 host helu.com
+handle @h_f4ebb6059ff6432cb2841a933ce7fb51 {
+    reverse_proxy 213.55.96.9 {
+        header_up Host {http.request.host}
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+# Route for Domain: aait.edu.et
+@ua_baa86a6779774b3f817a849051f83568 {
+    host aait.edu.et
+    not header Cookie *affini_clearance=*
+    not path /api/waf/verify
+}
+handle @ua_baa86a6779774b3f817a849051f83568 {
+    rewrite * /api/waf/challenge?domain=aait.edu.et&target={uri}
+    reverse_proxy api-dotnet:8080 {
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+@v_baa86a6779774b3f817a849051f83568 {
+    host aait.edu.et
+    path /api/waf/verify
+}
+handle @v_baa86a6779774b3f817a849051f83568 {
+    reverse_proxy api-dotnet:8080
+}
+@h_baa86a6779774b3f817a849051f83568 host aait.edu.et
+handle @h_baa86a6779774b3f817a849051f83568 {
+    reverse_proxy 10.5.10.3 {
+        header_up Host {http.request.host}
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+# Route for Domain: trigger.com
+@ua_84f059bcfc9041928080b030a8140ab5 {
+    host trigger.com
+    not header Cookie *affini_clearance=*
+    not path /api/waf/verify
+}
+handle @ua_84f059bcfc9041928080b030a8140ab5 {
+    rewrite * /api/waf/challenge?domain=trigger.com&target={uri}
+    reverse_proxy api-dotnet:8080 {
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+@v_84f059bcfc9041928080b030a8140ab5 {
+    host trigger.com
+    path /api/waf/verify
+}
+handle @v_84f059bcfc9041928080b030a8140ab5 {
+    reverse_proxy api-dotnet:8080
+}
+@h_84f059bcfc9041928080b030a8140ab5 host trigger.com
+handle @h_84f059bcfc9041928080b030a8140ab5 {
+    reverse_proxy 1.1.1.1 {
+        header_up Host {http.request.host}
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+# Route for Domain: trigger2.com
+@ua_6fa4ce883bb949cc900638371586b2e7 {
+    host trigger2.com
+    not header Cookie *affini_clearance=*
+    not path /api/waf/verify
+}
+handle @ua_6fa4ce883bb949cc900638371586b2e7 {
+    rewrite * /api/waf/challenge?domain=trigger2.com&target={uri}
+    reverse_proxy api-dotnet:8080 {
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+@v_6fa4ce883bb949cc900638371586b2e7 {
+    host trigger2.com
+    path /api/waf/verify
+}
+handle @v_6fa4ce883bb949cc900638371586b2e7 {
+    reverse_proxy api-dotnet:8080
+}
+@h_6fa4ce883bb949cc900638371586b2e7 host trigger2.com
+handle @h_6fa4ce883bb949cc900638371586b2e7 {
+    reverse_proxy 1.1.1.2 {
+        header_up Host {http.request.host}
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+# Route for Domain: trigger3.com
+@ua_e9078c32a1cc4bd3b298edf925b8bc85 {
+    host trigger3.com
+    not header Cookie *affini_clearance=*
+    not path /api/waf/verify
+}
+handle @ua_e9078c32a1cc4bd3b298edf925b8bc85 {
+    rewrite * /api/waf/challenge?domain=trigger3.com&target={uri}
+    reverse_proxy api-dotnet:8080 {
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+@v_e9078c32a1cc4bd3b298edf925b8bc85 {
+    host trigger3.com
+    path /api/waf/verify
+}
+handle @v_e9078c32a1cc4bd3b298edf925b8bc85 {
+    reverse_proxy api-dotnet:8080
+}
+@h_e9078c32a1cc4bd3b298edf925b8bc85 host trigger3.com
+handle @h_e9078c32a1cc4bd3b298edf925b8bc85 {
+    reverse_proxy 1.1.1.3 {
+        header_up Host {http.request.host}
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+# Route for Domain: trigger4.com
+@ua_1027d15be2634c0299a18dddaafffce4 {
+    host trigger4.com
+    not header Cookie *affini_clearance=*
+    not path /api/waf/verify
+}
+handle @ua_1027d15be2634c0299a18dddaafffce4 {
+    rewrite * /api/waf/challenge?domain=trigger4.com&target={uri}
+    reverse_proxy api-dotnet:8080 {
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+@v_1027d15be2634c0299a18dddaafffce4 {
+    host trigger4.com
+    path /api/waf/verify
+}
+handle @v_1027d15be2634c0299a18dddaafffce4 {
+    reverse_proxy api-dotnet:8080
+}
+@h_1027d15be2634c0299a18dddaafffce4 host trigger4.com
+handle @h_1027d15be2634c0299a18dddaafffce4 {
+    reverse_proxy 1.1.1.4 {
+        header_up Host {http.request.host}
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+# Route for Domain: trigger5.com
+@ua_7f62ff5bcc15401d972db81d18d556a2 {
+    host trigger5.com
+    not header Cookie *affini_clearance=*
+    not path /api/waf/verify
+}
+handle @ua_7f62ff5bcc15401d972db81d18d556a2 {
+    rewrite * /api/waf/challenge?domain=trigger5.com&target={uri}
+    reverse_proxy api-dotnet:8080 {
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+@v_7f62ff5bcc15401d972db81d18d556a2 {
+    host trigger5.com
+    path /api/waf/verify
+}
+handle @v_7f62ff5bcc15401d972db81d18d556a2 {
+    reverse_proxy api-dotnet:8080
+}
+@h_7f62ff5bcc15401d972db81d18d556a2 host trigger5.com
+handle @h_7f62ff5bcc15401d972db81d18d556a2 {
+    reverse_proxy 1.1.1.5 {
+        header_up Host {http.request.host}
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+# Route for Domain: trigger6.com
+@ua_d205bf7609914685bda9a26ce981ffc4 {
+    host trigger6.com
+    not header Cookie *affini_clearance=*
+    not path /api/waf/verify
+}
+handle @ua_d205bf7609914685bda9a26ce981ffc4 {
+    rewrite * /api/waf/challenge?domain=trigger6.com&target={uri}
+    reverse_proxy api-dotnet:8080 {
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+@v_d205bf7609914685bda9a26ce981ffc4 {
+    host trigger6.com
+    path /api/waf/verify
+}
+handle @v_d205bf7609914685bda9a26ce981ffc4 {
+    reverse_proxy api-dotnet:8080
+}
+@h_d205bf7609914685bda9a26ce981ffc4 host trigger6.com
+handle @h_d205bf7609914685bda9a26ce981ffc4 {
+    reverse_proxy 1.1.1.6 {
+        header_up Host {http.request.host}
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+# Route for Domain: trigger7.com
+@ua_298d189596da42aabdd08135a834b19c {
+    host trigger7.com
+    not header Cookie *affini_clearance=*
+    not path /api/waf/verify
+}
+handle @ua_298d189596da42aabdd08135a834b19c {
+    rewrite * /api/waf/challenge?domain=trigger7.com&target={uri}
+    reverse_proxy api-dotnet:8080 {
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+@v_298d189596da42aabdd08135a834b19c {
+    host trigger7.com
+    path /api/waf/verify
+}
+handle @v_298d189596da42aabdd08135a834b19c {
+    reverse_proxy api-dotnet:8080
+}
+@h_298d189596da42aabdd08135a834b19c host trigger7.com
+handle @h_298d189596da42aabdd08135a834b19c {
+    reverse_proxy 1.1.1.7 {
+        header_up Host {http.request.host}
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+# Route for Domain: trigger8.com
+@ua_8c8792583d4a43739be3f318875f91f0 {
+    host trigger8.com
+    not header Cookie *affini_clearance=*
+    not path /api/waf/verify
+}
+handle @ua_8c8792583d4a43739be3f318875f91f0 {
+    rewrite * /api/waf/challenge?domain=trigger8.com&target={uri}
+    reverse_proxy api-dotnet:8080 {
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+@v_8c8792583d4a43739be3f318875f91f0 {
+    host trigger8.com
+    path /api/waf/verify
+}
+handle @v_8c8792583d4a43739be3f318875f91f0 {
+    reverse_proxy api-dotnet:8080
+}
+@h_8c8792583d4a43739be3f318875f91f0 host trigger8.com
+handle @h_8c8792583d4a43739be3f318875f91f0 {
+    reverse_proxy 1.1.1.8 {
+        header_up Host {http.request.host}
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+# Route for Domain: trigger9.com
+@ua_35d8c51d4b5c4010ba0a5959253a7c19 {
+    host trigger9.com
+    not header Cookie *affini_clearance=*
+    not path /api/waf/verify
+}
+handle @ua_35d8c51d4b5c4010ba0a5959253a7c19 {
+    rewrite * /api/waf/challenge?domain=trigger9.com&target={uri}
+    reverse_proxy api-dotnet:8080 {
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+@v_35d8c51d4b5c4010ba0a5959253a7c19 {
+    host trigger9.com
+    path /api/waf/verify
+}
+handle @v_35d8c51d4b5c4010ba0a5959253a7c19 {
+    reverse_proxy api-dotnet:8080
+}
+@h_35d8c51d4b5c4010ba0a5959253a7c19 host trigger9.com
+handle @h_35d8c51d4b5c4010ba0a5959253a7c19 {
+    reverse_proxy 1.1.1.9 {
+        header_up Host {http.request.host}
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+# Route for Domain: admintest.com
+@h_123e4567e89b12d3a456426614174000 host admintest.com
+handle @h_123e4567e89b12d3a456426614174000 {
+    reverse_proxy host.docker.internal:5173 {
+        header_up Host {http.request.host}
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+# Route for Domain: localhost
+@h_EBA775229C7940B6B3F4F9CA3DFD81EB host localhost
+handle @h_EBA775229C7940B6B3F4F9CA3DFD81EB {
+    reverse_proxy host.docker.internal:5173 {
+        header_up Host {http.request.host}
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+# Route for WAF Dashboard (localhost)
+@assets {
+    path /api/* /uploads/*
+}
+handle @assets {
+    reverse_proxy api-dotnet:8080 {
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
+handle {
+    reverse_proxy host.docker.internal:5173 {
+        header_up Host {http.request.host}
+        header_up X-JA3-Fingerprint {tls.client.ja3_md5}
+    }
+}
+
