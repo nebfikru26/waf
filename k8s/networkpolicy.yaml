@@ -1,0 +1,74 @@
+# Defense-in-depth: without this, Kubernetes allows all pod-to-pod traffic
+# by default, so any pod in the cluster (or in this namespace) could reach
+# api-dotnet directly - bypassing the Coraza/Nginx edge proxy entirely and
+# forging trusted headers such as X-Real-IP (used by
+# DistributedRateLimiterMiddleware to bucket rate limits per real client IP).
+#
+# This policy restricts inbound traffic to api-dotnet pods to:
+#   - nginx-waf pods only (the only legitimate source of proxied client
+#     traffic that should be setting X-Real-IP), on the ports the API
+#     listens on (8080 = public API, 8082 = internal AI-sidecar callback).
+#
+# NOTE: enforcement requires a CNI that implements NetworkPolicy (e.g.
+# Calico, Cilium, or a cloud provider's native network policy support).
+# On a CNI without NetworkPolicy support (e.g. plain kubenet/flannel),
+# this manifest applies but has no effect - verify enforcement with
+# `kubectl get networkpolicy -n affinisecurity-waf` and a connectivity
+# test from a pod that should now be blocked.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-dotnet-ingress
+  namespace: affinisecurity-waf
+spec:
+  podSelector:
+    matchLabels:
+      app: api-dotnet
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: nginx-waf
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 8082
+---
+# nginx-waf is the internet-facing edge proxy: it must keep accepting
+# inbound traffic from the ingress controller (and, depending on cluster
+# setup, directly from outside the cluster on 80/443). Explicitly allowed
+# here so the namespace-wide default-deny below doesn't also cut this off.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nginx-waf-ingress
+  namespace: affinisecurity-waf
+spec:
+  podSelector:
+    matchLabels:
+      app: nginx-waf
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
+---
+# Complementary default-deny for the namespace: any pod not explicitly
+# allowed by a policy like the ones above gets no inbound traffic. Without
+# this, workloads added later (e.g. a debug pod, a new microservice) are
+# unprotected by default until someone remembers to write a policy for them.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: affinisecurity-waf
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
