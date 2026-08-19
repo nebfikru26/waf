@@ -341,10 +341,8 @@ export default function ThreatIntelligencePage() {
   const qc = useQueryClient();
   const canEdit = ["super_admin", "admin", "tenant_admin", "security_engineer", "security_analyst", "analyst"].includes(user?.role || "");
   const isLocked = user && !user.entitlements.hasThreatIntel;
-  const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
   const headers = {
-    "Content-Type": "application/json",
-    "Authorization": `Bearer ${token}`
+    "Content-Type": "application/json"
   };
 
   // ── IOC State ──

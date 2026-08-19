@@ -35,10 +35,8 @@ export default function DDoSProtectionPage() {
   const canEdit = (isPlatformAdmin || user?.role === "analyst") && (isPlatformAdmin || user?.entitlements?.hasDdosProtection);
   const isLocked = user && !isPlatformAdmin && !user.entitlements?.hasDdosProtection;
 
-  const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
   const headers = {
-    "Content-Type": "application/json",
-    "Authorization": `Bearer ${token}`
+    "Content-Type": "application/json"
   };
 
   const { data: settings, isLoading } = useQuery<any>({

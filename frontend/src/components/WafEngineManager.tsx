@@ -27,10 +27,8 @@ interface SyncBatch {
 
 export function WafEngineManager() {
     const { toast } = useToast();
-    const token = localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token");
     const headers = {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/json"
+      "Content-Type": "application/json"
     };
 
     const [isCrsSyncing, setIsCrsSyncing] = useState(false);

@@ -18,9 +18,7 @@ import { Switch } from "@/components/ui/switch";
 export function CmsManager() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const token = localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token");
   const headers = {
-    "Authorization": `Bearer ${token}`,
     "Content-Type": "application/json"
   };
 
@@ -124,7 +122,7 @@ export function CmsManager() {
       const form = new FormData();
       form.append("file", file);
       const res = await fetch("/api/cms/upload-logo", {
-        method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form,
+        method: "POST", headers: {}, body: form,
       });
       if (!res.ok) throw new Error(await res.text());
       const { logoUrl } = await res.json();

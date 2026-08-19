@@ -88,8 +88,7 @@ export default function BillingPage() {
   const [confirmDowngrade, setConfirmDowngrade] = useState<PlanConfig | null>(null);
   const [isContactSalesOpen, setIsContactSalesOpen] = useState(false);
   const isPlatformAdmin = user?.role === "super_admin" || user?.role === "admin" || user?.role === "support_engineer";
-  const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
-  const authHeaders = { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" };
+  const authHeaders = { "Content-Type": "application/json" };
 
   const { data: subs = [], isLoading: isLoadingSubs } = useQuery<SubscriptionData[]>({
     queryKey: ["billing"],

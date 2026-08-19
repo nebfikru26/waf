@@ -48,8 +48,7 @@ export default function AdminTenantPage() {
     const { notification } = App.useApp();
     const queryClient = useQueryClient();
     const { user, isLoading: authLoading } = useAuth();
-    const token = localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token");
-    const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    const headers = { "Content-Type": "application/json" };
 
     // Filter states
     const [searchText, setSearchText] = useState("");
@@ -132,8 +131,8 @@ export default function AdminTenantPage() {
             return res.json();
         },
         onSuccess: (data) => {
-            // Apply the impersonated token to local storage and force reload
-            localStorage.setItem("auth_token", data.token);
+            // The backend already swapped the active session to the impersonated tenant admin's
+            // HttpOnly cookie (see AdminController.Impersonate) — nothing to persist client-side.
             notification.success({
                 message: "Impersonation Active",
                 description: `You are now masquerading as ${data.tenant.name}.`

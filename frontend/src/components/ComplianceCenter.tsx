@@ -39,7 +39,7 @@ export const ComplianceCenter = () => {
     const { toast } = useToast();
     const queryClient = useQueryClient();
     const [isExporting, setIsExporting] = useState(false);
-    const headers = { "Authorization": `Bearer ${localStorage.getItem("auth_token")}`, "Content-Type": "application/json" };
+    const headers = { "Content-Type": "application/json" };
 
     const { data, isLoading, refetch } = useQuery<ComplianceStatus>({
         queryKey: ["compliance-status"],

@@ -331,7 +331,7 @@ function CustomRuleBuilder({ initialRule, onSave, onCancel, token }: {
       });
       const res = await fetch("/api/firewall/sandbox", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           Rule: form,
           Request: { ...sandboxReq, Headers: headersMap }
@@ -678,10 +678,8 @@ export default function PoliciesPage() {
     setExpandedOwaspRules(prev => ({ ...prev, [rId]: !prev[rId] }));
   };
 
-  const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || "";
   const headers = React.useMemo(() => ({
-    "Content-Type": "application/json",
-    "Authorization": `Bearer ${localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token") || ""}`
+    "Content-Type": "application/json"
   }), [user]);
 
   // Queries

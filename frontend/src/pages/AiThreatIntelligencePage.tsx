@@ -80,8 +80,7 @@ export default function AiThreatIntelligencePage() {
     }
 
     const authHeaders = useMemo(() => {
-        const token = localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token") || "";
-        return { Authorization: `Bearer ${token}` };
+        return {};
     }, []);
 
     const queryClient = useQueryClient();

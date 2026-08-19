@@ -51,8 +51,7 @@ const chartTooltipStyle = {
 
 export default function CrsDashboardPage() {
   const navigate = useNavigate();
-  const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
-  const headers = { "Authorization": `Bearer ${token}` };
+  const headers = {};
 
   const { data: analytics, isLoading, refetch, isFetching } = useQuery<CrsAnalytics>({
     queryKey: ["crs-analytics"],

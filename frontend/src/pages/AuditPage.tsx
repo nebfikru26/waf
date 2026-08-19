@@ -17,13 +17,12 @@ import {
 } from "@/components/ui/dialog";
 
 export default function AuditPage() {
-  const token = localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token");
   const [selectedLog, setSelectedLog] = useState<any>(null);
 
   const { data: auditLogs = [], isLoading } = useQuery({
     queryKey: ["audit-logs"],
     queryFn: () => fetch("/api/audit", {
-      headers: { "Authorization": `Bearer ${token}` }
+      headers: {}
     }).then(r => r.json())
   });
 

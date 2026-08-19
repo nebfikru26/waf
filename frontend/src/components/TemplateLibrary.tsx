@@ -60,8 +60,7 @@ export function TemplateLibrary({ embedded = false }: TemplateLibraryProps) {
     const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
-    const token = localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token");
-    const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    const headers = { "Content-Type": "application/json" };
 
     const { data: templates = [], isLoading, error } = useQuery<Template[], Error>({
         queryKey: ["rule-templates-simple"],

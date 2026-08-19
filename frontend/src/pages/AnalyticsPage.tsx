@@ -63,8 +63,7 @@ export default function AnalyticsPage() {
   const isPlatformAdmin = user?.role === "super_admin" || user?.role === "admin" || user?.role === "support_engineer";
   const isLocked = !authLoading && user && !isPlatformAdmin && !user.entitlements?.hasAnalytics;
   const [timeRange, setTimeRange] = useState("7d");
-  const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
-  const headers = { "Authorization": `Bearer ${token}` };
+  const headers = {};
 
   const queryClient = useQueryClient();
 

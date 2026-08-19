@@ -33,10 +33,8 @@ const statusColors: Record<string, string> = {
 
 export default function RateLimitingPage() {
   const { user } = useAuth();
-  const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
   const headers = {
-    "Content-Type": "application/json",
-    "Authorization": `Bearer ${token}`
+    "Content-Type": "application/json"
   };
   const isPlatformAdmin = user?.role === "super_admin" || user?.role === "admin" || user?.role === "support_engineer";
   const isLocked = !isPlatformAdmin && user && !user.entitlements.hasRateLimiting;

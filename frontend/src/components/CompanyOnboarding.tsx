@@ -57,8 +57,7 @@ export function CompanyOnboarding() {
     templateId: ""
   });
 
-  const token = localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token");
-  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  const headers = { "Content-Type": "application/json" };
 
   const { data: templates = [] } = useQuery({
     queryKey: ["rule-templates-simple"],

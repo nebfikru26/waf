@@ -52,10 +52,7 @@ export default function AlertsPage() {
     const isPlatformAdmin = user?.role === "super_admin" || user?.role === "admin" || user?.role === "support_engineer";
     const isLocked = !isPlatformAdmin && user && !user.entitlements.hasAttackLogs;
 
-    const authHeaders = useMemo(() => {
-        const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
-        return { "Authorization": `Bearer ${token}` };
-    }, []);
+    const authHeaders = useMemo(() => ({ "Content-Type": "application/json" }), []);
 
     // --- Queries ---
     const { data: alertsRaw = [], isLoading: alertsLoading } = useQuery({
@@ -536,12 +533,10 @@ function AlertDetailModal({ log, onClose }: { log: AttackLog, onClose: () => voi
 
     const excludeMutation = useMutation({
         mutationFn: async (data: { ruleId: string, uri: string }) => {
-            const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token"));
             const res = await fetch("/api/firewall/owasp-exclusions", {
                 method: "POST",
                 headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${token}`
+                    "Content-Type": "application/json"
                 },
                 body: JSON.stringify({
                     ruleId: data.ruleId,
@@ -564,12 +559,10 @@ function AlertDetailModal({ log, onClose }: { log: AttackLog, onClose: () => voi
 
     const blockMutation = useMutation({
         mutationFn: async (ipAddress: string) => {
-            const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token"));
             const res = await fetch("/api/firewall/rules", {
                 method: "POST",
                 headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${token}`
+                    "Content-Type": "application/json"
                 },
                 body: JSON.stringify({ ipAddress, ruleType: "blacklist", note: `Blocked from incident alert` })
             });

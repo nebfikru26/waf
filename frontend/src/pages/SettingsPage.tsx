@@ -20,8 +20,6 @@ export default function SettingsPage() {
   const [newKeyName, setNewKeyName] = useState("");
   const [newlyCreatedKey, setNewlyCreatedKey] = useState<string | null>(null);
 
-  const token = localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token");
-
   useEffect(() => {
     if (!user) return;
     loadData();
@@ -31,11 +29,8 @@ export default function SettingsPage() {
     if (!user) return;
     setLoading(true);
     try {
-      const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const response = await fetch("/api/domains", {
-        headers: {
-          "Authorization": `Bearer ${token}`
-        }
+        headers: {}
       });
       const data = await response.json();
       if (Array.isArray(data)) setDomains(data);
@@ -47,14 +42,14 @@ export default function SettingsPage() {
 
   const { data: apiKeys = [], isLoading: isLoadingKeys } = useQuery({
     queryKey: ["api-keys"],
-    queryFn: () => fetch("/api/apikey", { headers: { "Authorization": `Bearer ${token}` } }).then(r => r.json())
+    queryFn: () => fetch("/api/apikey", { headers: {} }).then(r => r.json())
   });
 
   const generateKeyMutation = useMutation({
     mutationFn: async (name: string) => {
       const res = await fetch("/api/apikey", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name })
       });
       if (!res.ok) throw new Error("Failed to generate key");
@@ -73,7 +68,7 @@ export default function SettingsPage() {
     mutationFn: async (id: string) => {
       const res = await fetch(`/api/apikey/${id}`, {
         method: "DELETE",
-        headers: { "Authorization": `Bearer ${token}` }
+        headers: {}
       });
       if (!res.ok) throw new Error("Failed to revoke key");
       return res.json();

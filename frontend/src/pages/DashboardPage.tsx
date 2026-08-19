@@ -128,9 +128,7 @@ export default function DashboardPage() {
   const { toast } = useToast();
   const [tenantSearchTerm, setTenantSearchTerm] = useState("");
 
-  const token = localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token");
   const headers = {
-    "Authorization": `Bearer ${token}`,
     "Content-Type": "application/json"
   };
 

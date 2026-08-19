@@ -227,10 +227,8 @@ export default function APIProtectionPage() {
   const [newMethod, setNewMethod] = useState("GET");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
-  const headers = { 
-    "Content-Type": "application/json",
-    "Authorization": `Bearer ${token}`
+  const headers = {
+    "Content-Type": "application/json"
   };
 
   const { data: endpoints = [], isLoading } = useQuery<APIEndpoint[]>({

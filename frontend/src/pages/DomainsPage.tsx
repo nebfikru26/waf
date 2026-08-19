@@ -116,9 +116,8 @@ function DomainDNSPanel({ domain }: { domain: Domain }) {
     if (instructions) { setOpen(!open); return; }
     setLoading(true);
     try {
-      const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const res = await fetch(`/api/domains/${domain.id}/dns-instructions`, {
-        headers: { "Authorization": `Bearer ${token}` }
+        headers: {}
       });
       if (res.ok) setInstructions(await res.json());
     } catch { /* ignore */ }
@@ -220,12 +219,10 @@ function AddDomainWizard({
   const submit = async () => {
     setSaving(true);
     try {
-      const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const res = await fetch("/api/domains", {
         method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+        headers: {
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           domain_name: form.name.trim(),
@@ -445,12 +442,10 @@ function EditDomainDialog({
     if (!domain) return;
     setSaving(true);
     try {
-      const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const res = await fetch(`/api/domains/${domain.id}`, {
         method: "PUT",
-        headers: { 
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+        headers: {
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({ 
           domain_name: form.name.trim(), 
@@ -612,9 +607,8 @@ export default function DomainsPage() {
   const loadDomains = async () => {
     setLoading(true);
     try {
-      const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const res = await fetch("/api/domains", {
-        headers: { "Authorization": `Bearer ${token}` }
+        headers: {}
       });
       const data = await res.json();
       if (Array.isArray(data)) {
@@ -631,10 +625,9 @@ export default function DomainsPage() {
   const verifyDns = async (id: string) => {
     setVerifyingId(id);
     try {
-      const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const res = await fetch(`/api/domains/${id}/verify-dns`, { 
         method: "PATCH",
-        headers: { "Authorization": `Bearer ${token}` }
+        headers: {}
       });
       if (res.ok) {
         setDomainsList(prev => prev.map(d => d.id === id ? { ...d, dns_verified: true, status: "active" } : d));
@@ -651,13 +644,11 @@ export default function DomainsPage() {
 
   const toggleFeature = async (domain: Domain, feature: 'under_attack_mode' | 'force_https') => {
     try {
-      const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const updatedDomain = { ...domain, [feature]: !domain[feature] };
       const res = await fetch(`/api/domains/${domain.id}`, {
         method: "PUT",
-        headers: { 
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+        headers: {
+          "Content-Type": "application/json"
         },
         body: JSON.stringify(updatedDomain),
       });
@@ -675,10 +666,9 @@ export default function DomainsPage() {
   const provisionSsl = async (id: string) => {
     setProvisioningId(id);
     try {
-      const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const res = await fetch(`/api/domains/${id}/provision-ssl`, { 
         method: "PATCH",
-        headers: { "Authorization": `Bearer ${token}` }
+        headers: {}
       });
       if (res.ok) {
         setDomainsList(prev => prev.map(d => d.id === id ? { ...d, ssl_provisioned: true } : d));
@@ -696,10 +686,9 @@ export default function DomainsPage() {
   const removeDomain = async (domain: Domain) => {
     setIsDeleting(true);
     try {
-      const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const res = await fetch(`/api/domains/${domain.id}`, { 
         method: "DELETE",
-        headers: { "Authorization": `Bearer ${token}` }
+        headers: {}
       });
       if (res.ok) {
         setDomainsList(prev => prev.filter(d => d.id !== domain.id));

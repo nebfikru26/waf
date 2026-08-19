@@ -38,9 +38,8 @@ export default function InstantAlertsPage() {
   const { data: rawAlerts = [], isLoading } = useQuery({
     queryKey: ["instant-alerts"],
     queryFn: async () => {
-      const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const res = await fetch("/api/alerts", {
-        headers: { "Authorization": `Bearer ${token}` }
+        headers: {}
       });
       return res.json();
     }

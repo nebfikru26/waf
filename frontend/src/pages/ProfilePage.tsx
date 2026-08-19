@@ -68,8 +68,7 @@ export default function ProfilePage() {
   const loadOrgData = async () => {
     setIsOrgLoading(true);
     try {
-      const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
-      const res = await fetch("/api/company", { headers: { "Authorization": `Bearer ${token}` } });
+      const res = await fetch("/api/company", { headers: {} });
       if (res.ok) {
         const data = await res.json();
         setOrgData({
@@ -96,10 +95,9 @@ export default function ProfilePage() {
     e.preventDefault();
     setIsSaving(true);
     try {
-      const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const res = await fetch("/api/profile/update", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formData)
       });
       if (!res.ok) throw new Error("Update failed");
@@ -116,10 +114,9 @@ export default function ProfilePage() {
     e.preventDefault();
     setIsOrgSaving(true);
     try {
-      const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const res = await fetch("/api/company", {
         method: "PUT",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(orgData)
       });
       if (!res.ok) {

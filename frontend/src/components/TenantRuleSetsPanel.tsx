@@ -34,8 +34,7 @@ export default function TenantRuleSetsPanel({ tenantId }: Props) {
     const [searchTerm, setSearchTerm] = useState("");
     const [filterCategory, setFilterCategory] = useState("all");
 
-    const token = localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token");
-    const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    const headers = { "Content-Type": "application/json" };
 
     // 1. Fetch Global Rules
     const { data: globalRules = [], isLoading: rulesLoading } = useQuery<CrsRule[]>({

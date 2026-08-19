@@ -60,10 +60,8 @@ export default function SSLManagementPage() {
   const canEdit = isPlatformAdmin || user?.role === "tenant_admin" || user?.role === "security_engineer";
   const isLocked = !isPlatformAdmin && user && !user.entitlements?.hasSslManagement;
 
-  const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
   const headers = {
-    "Content-Type": "application/json",
-    "Authorization": `Bearer ${token}`
+    "Content-Type": "application/json"
   };
 
   const { data: certs = [], isLoading: isLoadingCerts } = useQuery<SSLCertificate[]>({

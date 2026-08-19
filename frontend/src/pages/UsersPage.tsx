@@ -134,9 +134,7 @@ export default function UsersPage() {
   const [viewTarget, setViewTarget] = useState<UserData | null>(null);
   const [editForm, setEditForm] = useState({ name: "", phone: "", jobTitle: "", role: "" });
 
-  const token = localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token");
   const headers = {
-    "Authorization": `Bearer ${token}`,
     "Content-Type": "application/json"
   };
 
@@ -258,12 +256,10 @@ export default function UsersPage() {
   // Add system staff (platform admins only)
   const addStaffMutation = useMutation({
     mutationFn: async (payload: typeof SYSTEM_FORM) => {
-      const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const res = await fetch("/api/users", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify(payload),
       });
@@ -282,12 +278,10 @@ export default function UsersPage() {
   // Add tenant team member (tenant admins only)
   const addTenantStaffMutation = useMutation({
     mutationFn: async (payload: typeof TENANT_STAFF_FORM) => {
-      const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const res = await fetch("/api/users", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify(payload),
       });
@@ -306,12 +300,10 @@ export default function UsersPage() {
   // Add full client organization
   const addClientMutation = useMutation({
     mutationFn: async (payload: typeof CLIENT_FORM) => {
-      const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const res = await fetch("/api/clients", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify(payload),
       });
@@ -330,10 +322,9 @@ export default function UsersPage() {
   // Delete user (actual deletion)
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const res = await fetch(`/api/users/${id}`, {
         method: "DELETE",
-        headers: { "Authorization": `Bearer ${token}` }
+        headers: {}
       });
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
@@ -347,12 +338,10 @@ export default function UsersPage() {
   // Update User (Generic)
   const updateUserMutation = useMutation({
     mutationFn: async ({ id, ...payload }: Partial<UserData> & { id: string }) => {
-      const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const res = await fetch(`/api/users/${id}`, {
         method: "PATCH",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify(payload),
       });
@@ -374,12 +363,10 @@ export default function UsersPage() {
   // Reset password (send link)
   const resetMutation = useMutation({
     mutationFn: async ({ id }: { id: string }) => {
-      const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const res = await fetch(`/api/users/${id}/reset-password`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Content-Type": "application/json"
         },
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed"); }

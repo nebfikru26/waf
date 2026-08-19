@@ -84,9 +84,7 @@ export default function AdminPage() {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("plans");
 
-  const token = localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token");
   const headers = {
-    "Authorization": `Bearer ${token}`,
     "Content-Type": "application/json"
   };
 
@@ -125,9 +123,9 @@ export default function AdminPage() {
       if (!res.ok) throw new Error("Failed to impersonate tenant");
       return res.json();
     },
-    onSuccess: (data) => {
-      // Apply the impersonated token to local storage and force reload
-      localStorage.setItem("auth_token", data.token);
+    onSuccess: () => {
+      // The backend already swapped the active session to the impersonated tenant admin's
+      // HttpOnly cookie (see AdminController.Impersonate) — nothing to persist client-side.
       toast({ title: "Impersonation Active", description: "You are now managing the selected organization." });
       window.location.href = "/";
     },

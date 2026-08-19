@@ -90,9 +90,8 @@ export default function CrsRulesPage() {
   const { data: rules = [], isLoading } = useQuery<CrsRule[]>({
     queryKey: ["crs-rules"],
     queryFn: async () => {
-      const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const res = await fetch("/api/platform/crs/rules", {
-        headers: { "Authorization": `Bearer ${token}` }
+        headers: {}
       });
       if (!res.ok) throw new Error(`Failed to fetch CRS rules: ${res.status}`);
       return res.json();
@@ -101,12 +100,10 @@ export default function CrsRulesPage() {
 
   const updateRuleMutation = useMutation({
     mutationFn: async ({ id, action }: { id: string, action: string }) => {
-      const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const res = await fetch(`/api/platform/crs/rules/${id}`, {
         method: "PATCH",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({ action })
       });
