@@ -483,9 +483,14 @@ namespace AffiniSecurity.Waf.Services
             return newCount;
         }
 
-        // ─────────────────────────────────────────────────────────────────────
-        // 7. Ethiopian INSA / CERT Threat Feed
-        // ─────────────────────────────────────────────────────────────────────
+        // ─────────────────────────────────────────────────────────────────────────
+        // 7. Ethiopian INSA / CERT-ET Threat Feed
+        //    Supports two wire formats (auto-detected from Content-Type / body):
+        //    a) STIX 2.1 JSON Bundle  — { "type": "bundle", "objects": [...] }
+        //       Extracts ipv4-addr, domain-name, url, and file SHA256 indicators.
+        //    b) Plain newline-delimited IP / domain list (e.g., text/plain)
+        //       Each non-comment line is classified as IPv4 or domain by parsing.
+        // ─────────────────────────────────────────────────────────────────────────
 
         private async Task<int> SyncInsaThreatFeedAsync(CancellationToken ct)
         {
@@ -499,19 +504,114 @@ namespace AffiniSecurity.Waf.Services
                     return 0;
                 }
 
-                _logger.LogInformation("[ThreatFeed] INSA Feed: Fetching local threat intelligence...");
-                // Stub implementation assuming INSA provides a STIX/JSON feed or line-delimited IP feed.
-                // For compliance, we attempt to pull it down.
+                _logger.LogInformation("[ThreatFeed] INSA/CERT-ET: Fetching from {Url}...", insaUrl);
+                var response = await _httpClient.GetAsync(insaUrl, ct);
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("[ThreatFeed] INSA Feed: HTTP {Status}", response.StatusCode);
+                    return 0;
+                }
+
+                var contentType = response.Content.Headers.ContentType?.MediaType ?? "";
+                var body = await response.Content.ReadAsStringAsync(ct);
+
                 using var scope = _scopeFactory.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<WafDbContext>();
 
-                // In a true implementation, we would parse the STIX/TAXII feed response here.
-                // For now, it simply logs initialization.
+                // Auto-detect format: JSON (STIX bundle) vs plain text (IP list)
+                if (contentType.Contains("json", StringComparison.OrdinalIgnoreCase)
+                    || body.TrimStart().StartsWith('{'))
+                {
+                    newCount += await ParseStixBundleAsync(db, body, ct);
+                }
+                else
+                {
+                    newCount += await ParsePlainIpListAsync(db, body, ct);
+                }
 
-                _logger.LogInformation("[ThreatFeed] INSA Feed: +0 new indicators (parsing stub).");
+                await db.SaveChangesAsync(ct);
+                _logger.LogInformation("[ThreatFeed] INSA/CERT-ET: +{Count} new indicators.", newCount);
             }
             catch (Exception ex) { _logger.LogError(ex, "[ThreatFeed] INSA Feed sync failed."); }
             return newCount;
+        }
+
+        /// <summary>
+        /// Parses a STIX 2.1 JSON bundle. Walks bundle.objects[] for type="indicator"
+        /// and extracts values from the STIX pattern field using regex.
+        /// Supported pattern types: ipv4-addr, domain-name, url, file:hashes.SHA256
+        /// </summary>
+        private async Task<int> ParseStixBundleAsync(WafDbContext db, string json, CancellationToken ct)
+        {
+            int count = 0;
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(json);
+                if (!doc.RootElement.TryGetProperty("objects", out var objects)) return 0;
+
+                var ipPat     = new System.Text.RegularExpressions.Regex(@"\[ipv4-addr:value\s*=\s*'([^']+)'\]");
+                var domainPat = new System.Text.RegularExpressions.Regex(@"\[domain-name:value\s*=\s*'([^']+)'\]");
+                var urlPat    = new System.Text.RegularExpressions.Regex(@"\[url:value\s*=\s*'([^']+)'\]");
+                var hashPat   = new System.Text.RegularExpressions.Regex(@"\[file:hashes\.SHA256\s*=\s*'([^']+)'\]");
+
+                foreach (var obj in objects.EnumerateArray())
+                {
+                    if (!obj.TryGetProperty("type", out var typeEl) || typeEl.GetString() != "indicator") continue;
+                    if (!obj.TryGetProperty("pattern", out var patEl)) continue;
+
+                    var pattern  = patEl.GetString() ?? "";
+                    var name     = obj.TryGetProperty("name",   out var nameEl)   ? nameEl.GetString()   : "INSA Indicator";
+                    var severity = obj.TryGetProperty("labels", out var labelsEl)
+                        && labelsEl.EnumerateArray().Any(l => l.GetString()?.Contains("malicious") == true)
+                        ? "HIGH" : "MEDIUM";
+
+                    count += await UpsertInsaAsync(db, ipPat.Match(pattern).Groups[1].Value,      "IPv4",            name ?? "INSA", severity, ct);
+                    count += await UpsertInsaAsync(db, domainPat.Match(pattern).Groups[1].Value,  "domain",          name ?? "INSA", severity, ct);
+                    count += await UpsertInsaAsync(db, urlPat.Match(pattern).Groups[1].Value,     "URL",             name ?? "INSA", severity, ct);
+                    count += await UpsertInsaAsync(db, hashPat.Match(pattern).Groups[1].Value,    "FileHash-SHA256", name ?? "INSA", severity, ct);
+                }
+            }
+            catch (Exception ex) { _logger.LogError(ex, "[ThreatFeed] STIX bundle parse error."); }
+            return count;
+        }
+
+        /// <summary>
+        /// Parses a plain newline-delimited list of IPs or domain names.
+        /// Lines starting with '#' are treated as comments and skipped.
+        /// </summary>
+        private async Task<int> ParsePlainIpListAsync(WafDbContext db, string text, CancellationToken ct)
+        {
+            int count = 0;
+            foreach (var rawLine in text.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var entry = rawLine.Trim();
+                if (string.IsNullOrWhiteSpace(entry) || entry.StartsWith('#')) continue;
+                var indicatorType = System.Net.IPAddress.TryParse(entry, out _) ? "IPv4" : "domain";
+                count += await UpsertInsaAsync(db, entry, indicatorType, "INSA-Ethiopia Plain List", "MEDIUM", ct);
+            }
+            return count;
+        }
+
+        private async Task<int> UpsertInsaAsync(WafDbContext db, string value, string type, string pulseName, string severity, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return 0;
+            var existing = await db.IocIndicators.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(i => i.IndicatorValue == value && i.Source == "INSA-Ethiopia", ct);
+            if (existing != null) { existing.LastSeen = DateTime.UtcNow; existing.IsActive = true; return 0; }
+
+            db.IocIndicators.Add(new IocIndicator
+            {
+                IndicatorValue  = value,
+                IndicatorType   = type,
+                PulseName       = pulseName,
+                ThreatType      = "Local Threat (INSA/CERT-ET)",
+                Severity        = severity,
+                Source          = "INSA-Ethiopia",
+                ExternalId      = value,
+                ConfidenceScore = 85, // Ethiopian government-sourced intel
+            });
+            await _threatIntel.UpdateIocCacheAsync(value, type, "INSA-Ethiopia", severity);
+            return 1;
         }
 
         // ─────────────────────────────────────────────────────────────────────

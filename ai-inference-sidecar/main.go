@@ -717,10 +717,8 @@ func reportBlockedEvent(tenantID, requestURL, method string, score float64, mlSc
 		}
 		req.Header.Set("Content-Type", "application/json")
 
+		// Secret is guaranteed non-empty by the startup fail-fast guard in main()
 		secret := os.Getenv("SIDECAR_SIGNING_SECRET")
-		if secret == "" {
-			secret = "fallback_sidecar_secret_2026"
-		}
 		timestamp := strconv.FormatInt(time.Now().Unix(), 10)
 		msg := timestamp + "." + string(data)
 		h := hmac.New(sha256.New, []byte(secret))
@@ -809,6 +807,17 @@ func startHealthReporter(ctx context.Context, rdb *redis.Client) {
 // ─────────────────────────────────────────────
 
 func main() {
+	// ── Fail-Fast Security Guard ─────────────────────────────────────────────
+	// The sidecar MUST have a signing secret to authenticate events to the backend.
+	// An empty or missing secret would allow any service to forge WAF events.
+	sidecarSecret := os.Getenv("SIDECAR_SIGNING_SECRET")
+	if len(sidecarSecret) < 32 {
+		log.Fatal("[FATAL] SIDECAR_SIGNING_SECRET env var is missing or too short (< 32 chars). " +
+			"Set a strong secret via the SIDECAR_SIGNING_SECRET environment variable. Sidecar will not start.")
+	}
+	log.Println("[Security] SIDECAR_SIGNING_SECRET validated — sidecar will sign all events.")
+	// ─────────────────────────────────────────────────────────────────────────
+
 	socketPath := os.Getenv("UNIX_SOCKET_PATH")
 	if socketPath == "" {
 		socketPath = "/var/run/shared/ai.sock"
@@ -830,18 +839,20 @@ func main() {
 		loadONNXModel(modelPath)
 	}
 
-	// --- Redis ---
+	// --- Redis (with optional password auth) ---
 	redisAddr := os.Getenv("REDIS_ADDR")
 	if redisAddr == "" {
 		redisAddr = "redis:6379"
 	}
+	redisPassword := os.Getenv("REDIS_PASSWORD") // Empty string = no auth (dev only)
 	rdb := redis.NewClient(&redis.Options{
 		Addr:         redisAddr,
+		Password:     redisPassword,
 		DialTimeout:  500 * time.Millisecond,
 		ReadTimeout:  200 * time.Millisecond,
 		WriteTimeout: 200 * time.Millisecond,
 	})
-	log.Printf("[AI-Sidecar] Connecting to Redis at %s", redisAddr)
+	log.Printf("[AI-Sidecar] Connecting to Redis at %s (auth: %v)", redisAddr, redisPassword != "")
 
 	// --- NATS ---
 	natsURL := os.Getenv("NATS_URL")

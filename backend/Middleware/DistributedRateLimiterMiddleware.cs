@@ -45,7 +45,15 @@ namespace AffiniSecurity.Waf.Middleware
         {
             var db = _redis.GetDatabase();
 
-            var clientIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            // ── I1: Resolve real client IP from trusted Coraza/Nginx proxy ────────
+            // X-Real-IP is set by the Coraza proxy to the actual downstream client IP.
+            // Prefer it over RemoteIpAddress (which is the proxy socket address) to
+            // prevent all tenant rate-limit budget being consumed by a single proxy IP.
+            var realIp = context.Request.Headers["X-Real-IP"].ToString();
+            var clientIp = !string.IsNullOrWhiteSpace(realIp)
+                ? realIp.Trim()
+                : (context.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+
             var tenantId = context.Items["TenantId"]?.ToString() ?? "global";
             var key = $"ratelimit:{tenantId}:{clientIp}";
 
