@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-waf
+  namespace: affinisecurity-waf
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx-waf
+  template:
+    metadata:
+      labels:
+        app: nginx-waf
+    spec:
+      containers:
+      - name: nginx
+        image: ghcr.io/coreruleset/coraza-crs:nginx
+        ports:
+        - containerPort: 80
+        - containerPort: 443
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+        - name: tenant-configs
+          mountPath: /etc/nginx/conf.d/tenants
+        - name: rules-volume
+          mountPath: /etc/nginx/coraza/rules
+        - name: logs-volume
+          mountPath: /var/log/coraza
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: nginx-base-config
+      - name: tenant-configs
+        persistentVolumeClaim:
+          claimName: tenant-configs-pvc
+      - name: rules-volume
+        configMap:
+          name: coraza-rules
+      - name: logs-volume
+        emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-dotnet
+  namespace: affinisecurity-waf
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api-dotnet
+  template:
+    metadata:
+      labels:
+        app: api-dotnet
+    spec:
+      containers:
+      - name: api
+        image: affinisecurity/waf-api:latest
+        env:
+        - name: ConnectionStrings__DefaultConnection
+          valueFrom:
+            secretKeyRef:
+              name: db-secrets
+              key: connection-string
+        volumeMounts:
+        - name: tenant-configs
+          mountPath: /app/nginx/conf.d/tenants
+      volumes:
+      - name: tenant-configs
+        persistentVolumeClaim:
+          claimName: tenant-configs-pvc

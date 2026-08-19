@@ -14,22 +14,41 @@ namespace AffiniSecurity.Waf.Middleware
     public class BotManagementMiddleware
     {
         private readonly RequestDelegate _next;
-        private const string ChallengeSecret = "AFFINI_SHIELD_SECRET_2026_CHANGE_ME";
+        private readonly Microsoft.Extensions.Configuration.IConfiguration _config;
+        private string ChallengeSecret => _config["Waf:ChallengeSecret"] ?? "fallback_secret_should_not_be_used";
 
-        public BotManagementMiddleware(RequestDelegate next)
+        public BotManagementMiddleware(RequestDelegate next, Microsoft.Extensions.Configuration.IConfiguration config)
         {
             _next = next;
+            _config = config;
         }
 
         public async Task InvokeAsync(HttpContext context, WafDbContext dbContext)
         {
             var path = context.Request.Path.Value?.ToLower() ?? "";
             
-            // 1. Bypass essential paths
-            if (path.StartsWith("/api/waf") || path.StartsWith("/api/auth") || path.Contains("favicon") || path.Contains("_next") || path.EndsWith(".png") || path.EndsWith(".jpg") || path.EndsWith(".css") || path.EndsWith(".js"))
+            // 1. Bypass essential and internal paths
+            if (path.StartsWith("/api/internal/", StringComparison.OrdinalIgnoreCase) ||
+                path.StartsWith("/api/waf") || path.StartsWith("/api/auth") || path.Contains("favicon") || path.Contains("_next") || path.EndsWith(".png") || path.EndsWith(".jpg") || path.EndsWith(".css") || path.EndsWith(".js"))
             {
                 await _next(context);
                 return;
+            }
+
+            // 2. Bypass for authenticated API calls — only if the JWT is cryptographically valid.
+            // A bare presence check (StartsWith "Bearer") is insufficient: a stolen, expired, or
+            // low-scope token would bypass the entire bot layer. We verify the HMAC-SHA256
+            // signature and the 'exp' claim inline before granting the bypass.
+            var authHeader = context.Request.Headers["Authorization"].ToString();
+            if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            {
+                var token = authHeader.Substring("Bearer ".Length).Trim();
+                if (IsValidJwt(token))
+                {
+                    await _next(context);
+                    return;
+                }
+                // Token present but invalid — fall through to full bot scoring (do NOT return here)
             }
 
             // 3. Skip for internal routes or specific paths if needed
@@ -38,7 +57,9 @@ namespace AffiniSecurity.Waf.Middleware
                 path.StartsWith("/api/users") || path.StartsWith("/api/firewall") ||
                 path.StartsWith("/api/analytics") || path.StartsWith("/api/domains") ||
                 path.StartsWith("/api/ssl") || path.StartsWith("/api/traffic") ||
-                path.StartsWith("/api/challenge") || path.StartsWith("/api/alerts") || path.StartsWith("/uploads"))
+                path.StartsWith("/api/challenge") || path.StartsWith("/api/alerts") || 
+                path.StartsWith("/api/templates") || path.StartsWith("/api/tenant") ||
+                path.StartsWith("/api/admin") || path.StartsWith("/uploads"))
             {
                 await _next(context);
                 return;
@@ -160,6 +181,60 @@ namespace AffiniSecurity.Waf.Middleware
             }
 
             await _next(context);
+        }
+
+        /// <summary>
+        /// Lightweight inline JWT validator — verifies HMAC-SHA256 signature and 'exp' claim.
+        /// Only tokens signed with the configured Waf:JwtSecret and not yet expired bypass bot management.
+        /// </summary>
+        private bool IsValidJwt(string token)
+        {
+            try
+            {
+                var parts = token.Split('.');
+                if (parts.Length != 3) return false;
+
+                // Verify signature: HMACSHA256(base64url(header) + '.' + base64url(payload), secret)
+                var jwtSecret = _config["Waf:JwtSecret"];
+                if (string.IsNullOrEmpty(jwtSecret)) return false;
+
+                var signingInput = parts[0] + "." + parts[1];
+                using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(jwtSecret));
+                var computedHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(signingInput));
+                var computedSig = Convert.ToBase64String(computedHash)
+                    .Replace("+", "-").Replace("/", "_").TrimEnd('=');
+
+                // Constant-time comparison to prevent timing attacks
+                if (!CryptographicOperations.FixedTimeEquals(
+                        Encoding.UTF8.GetBytes(computedSig),
+                        Encoding.UTF8.GetBytes(parts[2])))
+                    return false;
+
+                // Decode payload and check 'exp' claim
+                var payloadJson = Encoding.UTF8.GetString(
+                    Convert.FromBase64String(PadBase64(parts[1])));
+                using var doc = System.Text.Json.JsonDocument.Parse(payloadJson);
+                if (doc.RootElement.TryGetProperty("exp", out var expElem))
+                {
+                    long exp = expElem.GetInt64();
+                    if (DateTimeOffset.UtcNow.ToUnixTimeSeconds() > exp)
+                        return false; // Expired
+                }
+
+                return true;
+            }
+            catch { return false; }
+        }
+
+        private static string PadBase64(string base64url)
+        {
+            var s = base64url.Replace('-', '+').Replace('_', '/');
+            return (s.Length % 4) switch
+            {
+                2 => s + "==",
+                3 => s + "=",
+                _ => s
+            };
         }
 
         private async Task<bool> VerifyBotOriginAsync(System.Net.IPAddress ip, string userAgent)

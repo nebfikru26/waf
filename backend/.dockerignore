@@ -1,0 +1,15 @@
+# .dockerignore for AffiniSecurity WAF Backend
+[Bb]in/
+[Oo]bj/
+.vs/
+.vscode/
+*.user
+*.suo
+*.sln.docstates
+.git/
+.gitignore
+.dockerignore
+out/
+appsettings.Development.json
+README.md
+Dockerfile

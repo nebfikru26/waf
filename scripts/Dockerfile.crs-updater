@@ -1,0 +1,13 @@
+FROM alpine:3.19
+
+# Install wget for HTTP calls and ca-certificates for HTTPS
+RUN apk add --no-cache wget ca-certificates
+
+WORKDIR /app
+
+COPY update-crs.sh /app/update-crs.sh
+RUN chmod +x /app/update-crs.sh
+
+VOLUME ["/data"]
+
+CMD ["/app/update-crs.sh"]

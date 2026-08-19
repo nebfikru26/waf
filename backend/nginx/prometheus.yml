@@ -1,0 +1,8 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'nginx-waf'
+    static_configs:
+      - targets: ['coraza-waf:9113']
+    metrics_path: /metrics

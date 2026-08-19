@@ -162,6 +162,21 @@ namespace AffiniSecurity.Waf.Services
 
                 db.AlertLogs.Add(alert);
                 Console.WriteLine($"[Ingester] Saved Alert: {ruleId} - {ruleMessage} for Tenant: {tenantId}");
+
+                // Republish immediately to internal NATS for UI live SSE streaming
+                var nats = scope.ServiceProvider.GetService<INatsService>();
+                if (nats != null)
+                {
+                    try
+                    {
+                        var livePayload = JsonSerializer.Serialize(new { tenantId, ip = clientIp, ruleId, ruleMessage, severity = severityStr, uri, timestamp = alert.Timestamp });
+                        nats.Publish("waf.events.crs", livePayload);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[Ingester] Failed to publish CRS SSE event to NATS: {ex.Message}");
+                    }
+                }
             }
 
             await db.SaveChangesAsync();

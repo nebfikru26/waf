@@ -15,7 +15,12 @@ namespace AffiniSecurity.Waf.Controllers
     [Route("api/waf")]
     public class WafChallengeController : ControllerBase
     {
-        private const string ChallengeSecret = "AFFINI_SHIELD_SECRET_2026_CHANGE_ME";
+        private readonly string _challengeSecret;
+
+        public WafChallengeController(Microsoft.Extensions.Configuration.IConfiguration config)
+        {
+            _challengeSecret = config["Waf:ChallengeSecret"] ?? throw new InvalidOperationException("Missing Waf:ChallengeSecret in configuration");
+        }
 
         [HttpGet("challenge")]
         public async Task<IActionResult> GetChallenge([FromQuery] string domain, [FromQuery] string target, [FromServices] WafDbContext dbContext)
@@ -280,7 +285,7 @@ namespace AffiniSecurity.Waf.Controllers
             var expiry = DateTimeOffset.UtcNow.AddHours(2).ToUnixTimeSeconds();
             var dataToSign = $"{payload.Domain}:{expiry}";
             
-            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(ChallengeSecret));
+            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(_challengeSecret));
             var sigBytes = hmac.ComputeHash(Encoding.UTF8.GetBytes(dataToSign));
             var signature = Convert.ToBase64String(sigBytes).Replace("+", "-").Replace("/", "_").Replace("=", "");
             

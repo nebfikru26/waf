@@ -1,33 +1,81 @@
 services:
   coraza-waf:
-    image: ghcr.io/coreruleset/coraza-crs:caddy-alpine
+    image: ghcr.io/coreruleset/coraza-crs:nginx
     restart: always
     ports:
       - "80:80"
       - "443:443"
     environment:
-      - BACKEND=api-dotnet:8080
+      - BACKEND=http://api-dotnet:8080
       - CORAZA_AUDIT_ENGINE=RelevantOnly
       - CORAZA_AUDIT_LOG=/var/log/coraza/audit.log
       - CORAZA_AUDIT_LOG_FORMAT=JSON
       - CORAZA_AUDIT_LOG_TYPE=Serial
-    entrypoint: [ "caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile" ]
+      - ALLOWED_METHODS=GET HEAD POST OPTIONS PUT DELETE PATCH
     volumes:
-      - ./backend/caddy/Caddyfile:/etc/caddy/Caddyfile
-      - ./backend/caddy:/opt/coraza/config
+      - ./backend/nginx/nginx.conf:/templates/nginx.conf:ro
+      - ./backend/nginx/conf.d/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./backend/nginx/conf.d/tenants:/etc/nginx/conf.d/tenants:ro
+      - ./backend/nginx/coraza/coraza.conf:/templates/coraza.conf:ro
+      - ./backend/nginx/coraza/crs-setup.conf:/templates/crs-setup.conf:ro
+      - ./backend/nginx/coraza/tenant-rules.conf:/opt/coraza/rules.d/tenant-rules.conf:ro
+      - ./backend/nginx/ssl:/etc/nginx/ssl:ro
       - ./backend/owasp-rules/rules:/opt/coraza/owasp-crs/rules:ro
       - ./frontend/dist:/srv:ro
-      - coraza_logs:/var/log/coraza
+      - ./backend/nginx/logs:/var/log/coraza
+      - ./backend/nginx/conf.d/ai_agent.js:/etc/nginx/conf.d/ai_agent.js:ro
+      - shared_sockets:/var/run/shared:rw
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       - api-dotnet
+      - ai-inference-sidecar
+
+  ai-inference-sidecar:
+    build:
+      context: ./ai-inference-sidecar
+      dockerfile: Dockerfile
+    restart: always
+    volumes:
+      - shared_sockets:/var/run/shared:rw
+      - ml_models:/models:ro
+    environment:
+      - UNIX_SOCKET_PATH=/var/run/shared/ai.sock
+      - ANOMALY_THRESHOLD=0.80
+      - INTERNAL_API_URL=http://api-dotnet:8082
+      - SIDECAR_SIGNING_SECRET=${SIDECAR_SIGNING_SECRET}
+      - ONNX_MODEL_PATH=/models/waf_classifier.onnx
+      - ONNX_LIB_PATH=/usr/lib/libonnxruntime.so
+      - NATS_URL=nats://nats:4222
+      - REDIS_ADDR=redis:6379
+    depends_on:
+      - redis
+      - nats
+
+  ml-trainer:
+    build:
+      context: ./ml-trainer
+      dockerfile: Dockerfile
+    restart: "no"
+    volumes:
+      - ml_models:/models:rw
+    environment:
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+      - CLICKHOUSE_DB=default
+      - DATASET_PATH=/data/waf_training_dataset.parquet
+      - MODEL_OUTPUT=/models/waf_classifier.onnx
+      - METRICS_OUTPUT=/models/latest_metrics.json
+    depends_on:
+      - clickhouse
+
 
   log-shipper:
     image: natsio/nats-box:latest
     restart: always
     volumes:
-      - coraza_logs:/var/log/coraza:ro
+      - ./backend/nginx/logs:/var/log/coraza:ro
     depends_on:
       - nats
     entrypoint: [ "/bin/sh", "-c" ]
@@ -45,19 +93,32 @@ services:
       
     restart: always
     environment:
-      - ASPNETCORE_ENVIRONMENT=Development
-      - ConnectionStrings__DefaultConnection=Host=postgres-primary;Database=waf;Username=waf_app_user;Password=WafSecurePass2026!
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_HTTP_PORTS=8080;8082
+      - ConnectionStrings__DefaultConnection=Host=postgres-primary;Database=waf;Username=postgres;Password=${POSTGRES_PASSWORD}
+      - ConnectionStrings__AuditConnection=Host=postgres-primary;Database=waf;Username=waf_audit_user;Password=${WAF_AUDIT_PASSWORD}
+      - ConnectionStrings__ClickHouseConnection=Host=clickhouse;Port=8123;Username=default;Password=${CLICKHOUSE_PASSWORD}
       - Waf__RedisUrl=redis:6379
       - Waf__NatsUrl=nats://nats:4222
-      - Waf__JwtSecret=AFFINI_SECURE_WAF_KEY_2026_PROD_REPLACE_ME_NOW_
-      - Waf__AllowedOrigins=http://localhost:80,http://localhost:443
+      - Waf__JwtSecret=${WAF_JWT_SECRET}
+      - Waf__JwtIssuer=${WAF_JWT_ISSUER}
+      - Waf__JwtAudience=${WAF_JWT_AUDIENCE}
+      - Waf__ChallengeSecret=${CHALLENGE_SECRET}
+      - Waf__AllowedOrigins=${ALLOWED_ORIGINS}
+      - Waf__OwaspCrsPath=/opt/coraza/owasp-crs/rules
+      - Waf__ThreatFeed__OtxApiKey=${OTX_API_KEY}
+      - Waf__ThreatFeed__AbusechApiKey=${ABUSECH_API_KEY}
+      - SIDECAR_SIGNING_SECRET=${SIDECAR_SIGNING_SECRET}
+
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     volumes:
       - ./backend/owasp-rules/rules:/opt/coraza/owasp-crs/rules:rw
-      - coraza_logs:/var/log/coraza:ro
+      - ./backend/nginx/logs:/var/log/coraza:ro
       - ./backend/wwwroot:/app/wwwroot
-      - ./backend/caddy:/app/caddy
-    ports:
-      - "5001:8080"
+      - ./backend/nginx:/app/nginx
+
     depends_on:
       - postgres-primary
       - redis
@@ -67,34 +128,64 @@ services:
     image: postgres:15
     environment:
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=secret
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=waf
-    ports:
-      - "5432:5432"
+
     volumes:
       - pg_data:/var/lib/postgresql/data
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+
 
   nats:
     image: nats:latest
-    ports:
-      - "8222:8222"
-      - "4222:4222"
+
 
   clickhouse:
     image: clickhouse/clickhouse-server:latest
-    ports:
-      - "8123:8123"
-      - "9000:9000"
+    environment:
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+
     ulimits:
       nofile:
         soft: 262144
         hard: 262144
 
+  crs-updater:
+    build:
+      context: ./scripts
+      dockerfile: Dockerfile.crs-updater
+    restart: always
+    environment:
+      - BACKEND_API=http://api-dotnet:8080
+      - CHECK_INTERVAL_SEC=86400
+      - ADMIN_EMAIL=admin@affinisecurity.io
+      - ADMIN_PASSWORD=${CRS_UPDATER_ADMIN_PASSWORD}
+    volumes:
+      - ./backend/owasp-rules/rules:/app/owasp-rules/rules:rw
+    depends_on:
+      - api-dotnet
+
+  prometheus:
+    image: prom/prometheus:latest
+    restart: always
+    volumes:
+      - ./backend/nginx/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: always
+
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+    depends_on:
+      - prometheus
+
 volumes:
   pg_data:
   coraza_logs:
+  shared_sockets:
+  ml_models:

@@ -3,10 +3,11 @@ using Microsoft.AspNetCore.Authorization;
 using AffiniSecurity.Waf.Data;
 using AffiniSecurity.Waf.Models;
 using Microsoft.EntityFrameworkCore;
+using AffiniSecurity.Waf.Security;
 
 namespace AffiniSecurity.Waf.Controllers
 {
-    [Authorize(Roles = "super_admin")]
+    [Authorize]
     [ApiController]
     [Route("api/platform/crs")]
     public class CrsRulesController : ControllerBase
@@ -21,27 +22,19 @@ namespace AffiniSecurity.Waf.Controllers
         [HttpGet("rules")]
         public async Task<IActionResult> GetRules()
         {
-            var rulesInDb = await _context.OWASPRules.IgnoreQueryFilters().Where(r => r.TenantId == null).ToListAsync();
-            var fullList = SeedCrsRules();
+            // Return ALL global rules from DB (TenantId == null), including rules imported via CRS sync.
+            // Previously this was filtered against a hardcoded list which silently excluded newly-synced GitHub rules.
+            var rules = await _context.OWASPRules
+                .IgnoreQueryFilters()
+                .Where(r => r.TenantId == null)
+                .OrderBy(r => r.RuleId)
+                .ToListAsync();
 
-            // Check for missing rules and add them
-            var missingRules = fullList.Where(f => !rulesInDb.Any(r => r.RuleId == f.RuleId)).ToList();
-            if (missingRules.Any())
-            {
-                foreach (var rule in missingRules)
-                {
-                    rule.Id = Guid.NewGuid().ToString();
-                    _context.OWASPRules.Add(rule);
-                }
-                await _context.SaveChangesAsync();
-                // Refresh list
-                rulesInDb = await _context.OWASPRules.IgnoreQueryFilters().Where(r => r.TenantId == null).ToListAsync();
-            }
-            
-            return Ok(rulesInDb.OrderBy(r => r.RuleId).ToList());
+            return Ok(rules);
         }
 
         [HttpPatch("rules/{id}")]
+        [Authorize(Policy = WafPolicies.RequirePlatformAdmin)]
         public async Task<IActionResult> UpdateRule(string id, [FromBody] OWASPRule updatedRule)
         {
             var rule = await _context.OWASPRules.IgnoreQueryFilters().FirstOrDefaultAsync(r => r.Id == id && r.TenantId == null);
@@ -53,6 +46,9 @@ namespace AffiniSecurity.Waf.Controllers
             if (updatedRule.Category != null) rule.Category = updatedRule.Category;
             if (updatedRule.Name != null) rule.Name = updatedRule.Name;
             if (updatedRule.RuleId != null) rule.RuleId = updatedRule.RuleId;
+            // New MITRE fields
+            if (updatedRule.MitreTechnique != null) rule.MitreTechnique = updatedRule.MitreTechnique;
+            if (updatedRule.MitreTactic != null) rule.MitreTactic = updatedRule.MitreTactic;
 
             await _context.SaveChangesAsync();
             return Ok(rule);

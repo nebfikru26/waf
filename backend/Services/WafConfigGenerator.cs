@@ -15,22 +15,31 @@ namespace AffiniSecurity.Waf.Services
     {
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<WafConfigGenerator> _logger;
-        private readonly string _configPath = "/app/caddy/tenant-rules.conf";
-        private readonly string _routesPath = "/app/caddy/tenant-routes.caddy";
-        private readonly string _caddyApiUrl = "http://coraza-waf:2019/load";
+        private readonly string _configPath;
+        private readonly string _routesPath;
+        private readonly string _nginxReloadSignalPath;
 
-        public WafConfigGenerator(IServiceScopeFactory scopeFactory, ILogger<WafConfigGenerator> logger)
+        public WafConfigGenerator(IServiceScopeFactory scopeFactory, ILogger<WafConfigGenerator> logger, Microsoft.Extensions.Configuration.IConfiguration configuration)
         {
             _scopeFactory = scopeFactory;
             _logger = logger;
+
+            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            var nginxDir = Path.Combine(baseDir, "nginx");
+            if (!Directory.Exists(nginxDir)) Directory.CreateDirectory(nginxDir);
+            if (!Directory.Exists(Path.Combine(nginxDir, "conf.d", "tenants"))) Directory.CreateDirectory(Path.Combine(nginxDir, "conf.d", "tenants"));
+
+            _configPath = configuration["Waf:NginxConfigPath"] ?? Path.Combine(nginxDir, "coraza", "tenant-rules.conf");
+            _routesPath = configuration["Waf:NginxRoutesPath"] ?? Path.Combine(nginxDir, "conf.d", "tenants", "tenants.conf");
+            _nginxReloadSignalPath = Path.Combine(nginxDir, "reload.signal");
             
-            // Initial generation on startup to ensure persistence across container restarts
+            // Initial generation on startup
             _ = GenerateAndReloadAsync();
         }
 
         public async Task GenerateAndReloadAsync()
         {
-            _logger.LogInformation("Generating dynamic WAF configuration for all tenants...");
+            _logger.LogInformation("Generating dynamic Nginx/WAF configuration for all tenants...");
 
             var sb = new StringBuilder();
             sb.AppendLine("# --- DYNAMIC TENANT ORCHESTRATION ---");
@@ -48,7 +57,6 @@ namespace AffiniSecurity.Waf.Services
                 var domains = await context.Domains.IgnoreQueryFilters().ToListAsync();
                 var allSettings = await context.SecuritySettings.IgnoreQueryFilters().ToListAsync();
                 
-                // Fetch all overrides and custom rules upfront to minimize DB roundtrips in the loop
                 var allOwaspOverrides = await context.OWASPRules.IgnoreQueryFilters()
                     .Where(r => r.TenantId != null && r.RuleId != null)
                     .ToListAsync();
@@ -61,18 +69,31 @@ namespace AffiniSecurity.Waf.Services
                     .Where(r => r.TenantId != null)
                     .ToListAsync();
 
+                // Fetch all rule files to identify valid rule IDs and prevent "Rule not found" crashes in Nginx/Coraza
+                var validRuleIds = new HashSet<int>();
+                var rulesDir = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>()["Waf:OwaspCrsPath"] 
+                               ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "owasp-rules", "rules");
+                
+                if (Directory.Exists(rulesDir))
+                {
+                    var ruleFiles = Directory.GetFiles(rulesDir, "*.conf");
+                    foreach (var file in ruleFiles)
+                    {
+                        var content = await File.ReadAllTextAsync(file);
+                        var matches = System.Text.RegularExpressions.Regex.Matches(content, @"id:(\d+)");
+                        foreach (System.Text.RegularExpressions.Match match in matches)
+                        {
+                            if (int.TryParse(match.Groups[1].Value, out int rid)) validRuleIds.Add(rid);
+                        }
+                    }
+                }
+
                 int ruleIdBase = 400000;
-                int routesRuleIdBase = 500000;
 
                 foreach (var domain in domains)
                 {
                     if (string.IsNullOrWhiteSpace(domain.DomainName)) continue;
                     
-                    // localhost orchestration is now enabled for testing
-                    if (domain.DomainName.ToLower() == "localhost") { 
-                        // Proceed with orchestration
-                    }
-
                     string engineMode = domain.ProtectionMode?.ToLower() == "detection" ? "DetectionOnly" : "On";
                     int paranoia = domain.Sensitivity > 0 ? domain.Sensitivity : 1;
 
@@ -82,80 +103,75 @@ namespace AffiniSecurity.Waf.Services
                     
                     // --- OWASP Rule URI Exclusions ---
                     var tenantExclusions = allRuleExclusions.Where(r => r.TenantId == domain.TenantId).ToList();
-                    if (tenantExclusions.Any())
+                    foreach (var exc in tenantExclusions)
                     {
-                        sb.AppendLine($"# OWASP URI Exclusions for Tenant {domain.TenantId}");
-                        foreach (var exc in tenantExclusions)
-                        {
-                            // Scoped exclusion: Only remove the rule if BOTH the Host and the URI pattern match
-                            sb.AppendLine($"SecRule REQUEST_HEADERS:Host \"@streq {domain.DomainName}\" \"id:{ruleIdBase++},phase:1,t:none,nolog,pass,chain\"");
-                            sb.AppendLine($"  SecRule REQUEST_URI \"@beginsWith {exc.UriPattern}\" \"ctl:ruleRemoveById={exc.RuleId}\"");
-                        }
+                        if (int.TryParse(exc.RuleId, out int rid) && !validRuleIds.Contains(rid)) continue;
+                        
+                        sb.AppendLine($"SecRule REQUEST_HEADERS:Host \"@streq {domain.DomainName}\" \"id:{ruleIdBase++},phase:1,t:none,nolog,pass,chain\"");
+                        sb.AppendLine($"  SecRule REQUEST_URI \"@beginsWith {exc.UriPattern}\" \"ctl:ruleRemoveById={exc.RuleId}\"");
                     }
 
                     // --- OWASP Core Rule Set Overrides ---
                     var tenantOverrides = allOwaspOverrides.Where(r => r.TenantId == domain.TenantId).ToList();
-                    if (tenantOverrides.Any())
+                    foreach (var ovr in tenantOverrides)
                     {
-                        sb.AppendLine($"# OWASP Overrides for Tenant {domain.TenantId}");
-                        foreach (var ovr in tenantOverrides)
-                        {
-                            string corazaAction = ovr.Action.ToUpper() switch {
-                                "BLOCK" => "deny",
-                                "DISABLED" => "remove",
-                                _ => "pass" // LOG/SIMULATE
-                            };
-                            
-                            // Using ctl:ruleRemoveById for disabling, or SecRuleUpdateActionById for blocking
-                            if (corazaAction == "remove") {
-                                sb.AppendLine($"SecRule REQUEST_HEADERS:Host \"@streq {domain.DomainName}\" \"id:{ruleIdBase++},phase:1,t:none,nolog,pass,ctl:ruleRemoveById={ovr.RuleId}\"");
-                            } else {
-                                string severityAction = !string.IsNullOrEmpty(ovr.Severity) ? $",severity:'{ovr.Severity}'" : "";
-                                sb.AppendLine($"SecRuleUpdateActionById {ovr.RuleId} \"{corazaAction}{severityAction}\"");
-                            }
+                        if (string.IsNullOrEmpty(ovr.RuleId) || !int.TryParse(ovr.RuleId, out int rid) || !validRuleIds.Contains(rid)) continue;
+
+                        string corazaAction = ovr.Action.ToUpper() switch {
+                            "BLOCK" => "deny",
+                            "DISABLED" => "remove",
+                            _ => "pass"
+                        };
+                        
+                        if (corazaAction == "remove") {
+                            sb.AppendLine($"SecRule REQUEST_HEADERS:Host \"@streq {domain.DomainName}\" \"id:{ruleIdBase++},phase:1,t:none,nolog,pass,ctl:ruleRemoveById={ovr.RuleId}\"");
+                        } else {
+                            string severityAction = !string.IsNullOrEmpty(ovr.Severity) ? $",severity:'{ovr.Severity}'" : "";
+                            sb.AppendLine($"SecRuleUpdateActionById {ovr.RuleId} \"{corazaAction}{severityAction}\"");
                         }
                     }
 
                     // --- Custom Rules ---
                     var customRules = allCustomRules.Where(r => r.TenantId == domain.TenantId).OrderBy(r => r.Priority).ToList();
-                    if (customRules.Any())
+                    foreach (var rule in customRules)
                     {
-                        sb.AppendLine($"# Custom Policies for Tenant {domain.TenantId}");
-                        foreach (var rule in customRules)
+                        if (rule.IsRaw && !string.IsNullOrWhiteSpace(rule.RawContent))
                         {
-                            if (rule.IsRaw && !string.IsNullOrWhiteSpace(rule.RawContent))
-                            {
-                                sb.AppendLine($"# Raw Policy: {rule.Name}");
-                                sb.AppendLine(rule.RawContent);
-                            }
-                            else
-                            {
-                                // Generate structured SecRule
-                                string op = rule.ConditionOperator.ToLower() switch {
-                                    "contains" => "@contains",
-                                    "starts_with" => "@beginsWith",
-                                    "ends_with" => "@endsWith",
-                                    "regex" => "@rx",
-                                    _ => "@streq"
-                                };
-                                string field = rule.ConditionField.ToUpper() switch {
-                                    "IP" => "REMOTE_ADDR",
-                                    "URL" => "REQUEST_URI",
-                                    "USER_AGENT" => "REQUEST_HEADERS:User-Agent",
-                                    "METHOD" => "REQUEST_METHOD",
-                                    _ => "REQUEST_URI"
-                                };
-                                string action = rule.Action.ToUpper() == "BLOCK" ? "deny,status:403" : "pass,log";
-                                
-                                sb.AppendLine($"SecRule {field} \"{op} {rule.ConditionValue}\" \"id:{ruleIdBase++},phase:2,t:none,{action},msg:'Custom Rule: {rule.Name}'\"");
-                            }
+                            sb.AppendLine(rule.RawContent);
+                        }
+                        else
+                        {
+                            string op = rule.ConditionOperator.ToLower() switch {
+                                "contains" => "@contains",
+                                "starts_with" => "@beginsWith",
+                                "ends_with" => "@endsWith",
+                                "regex" => "@rx",
+                                _ => "@streq"
+                            };
+                            string field = rule.ConditionField.ToUpper() switch {
+                                "IP" => "REMOTE_ADDR",
+                                "URL" => "REQUEST_URI",
+                                "USER_AGENT" => "REQUEST_HEADERS:User-Agent",
+                                "METHOD" => "REQUEST_METHOD",
+                                _ => "REQUEST_URI"
+                            };
+                            string action = rule.Action.ToUpper() == "BLOCK" ? "deny,status:403" : "pass,log";
+                            sb.AppendLine($"SecRule {field} \"{op} {rule.ConditionValue}\" \"id:{ruleIdBase++},phase:2,t:none,{action},msg:'Custom Rule: {rule.Name}'\"");
                         }
                     }
                     sb.AppendLine();
 
                     if (!string.IsNullOrWhiteSpace(domain.OriginIp))
                     {
-                        routesSb.AppendLine($"# Route for Domain: {domain.DomainName}");
+                        routesSb.AppendLine($"# Server block for {domain.DomainName}");
+                        routesSb.AppendLine($"server {{");
+                        routesSb.AppendLine($"    listen 80;");
+                        routesSb.AppendLine($"    server_name {domain.DomainName};");
+                        routesSb.AppendLine();
+                        routesSb.AppendLine($"    # WAF Enabled");
+                        routesSb.AppendLine($"    coraza on;");
+                        routesSb.AppendLine($"    coraza_rules_file /opt/coraza/config/coraza-rules.conf;");
+                        routesSb.AppendLine();
                         
                         var settings = allSettings.FirstOrDefault(s => s.TenantId == domain.TenantId);
                         bool isChallengeForced = domain.UnderAttackMode || 
@@ -164,69 +180,43 @@ namespace AffiniSecurity.Waf.Services
 
                         if (isChallengeForced)
                         {
-                            string safeId = domain.Id.ToString().Replace("-", "");
-                            
-                            routesSb.AppendLine($"@ua_{safeId} {{");
-                            routesSb.AppendLine($"    host {domain.DomainName}");
-                            routesSb.AppendLine("    not header Cookie *affini_clearance=*");
-                            routesSb.AppendLine("    not path /api/waf/verify");
-                            routesSb.AppendLine("}");
-                            routesSb.AppendLine($"handle @ua_{safeId} {{");
-                            routesSb.AppendLine($"    rewrite * /api/waf/challenge?domain={domain.DomainName}&target={{uri}}");
-                            routesSb.AppendLine("    reverse_proxy api-dotnet:8080 {");
-                            routesSb.AppendLine("        header_up X-JA3-Fingerprint {tls.client.ja3_md5}");
+                            routesSb.AppendLine("    location /api/waf/verify {");
+                            routesSb.AppendLine("        proxy_pass http://api-dotnet:8080;");
                             routesSb.AppendLine("    }");
-                            routesSb.AppendLine("}");
                             routesSb.AppendLine();
-                            
-                            routesSb.AppendLine($"@v_{safeId} {{");
-                            routesSb.AppendLine($"    host {domain.DomainName}");
-                            routesSb.AppendLine("    path /api/waf/verify");
-                            routesSb.AppendLine("}");
-                            routesSb.AppendLine($"handle @v_{safeId} {{");
-                            routesSb.AppendLine("    reverse_proxy api-dotnet:8080");
-                            routesSb.AppendLine("}");
+                            routesSb.AppendLine("    location / {");
+                            routesSb.AppendLine("        if ($http_cookie !~* \"affini_clearance=\") {");
+                            routesSb.AppendLine($"            rewrite ^ /api/waf/challenge?domain={domain.DomainName}&target=$request_uri break;");
+                            routesSb.AppendLine("            proxy_pass http://api-dotnet:8080;");
+                            routesSb.AppendLine("        }");
+                            routesSb.AppendLine($"        proxy_pass http://{domain.OriginIp};");
+                            routesSb.AppendLine("        proxy_set_header Host $host;");
+                            routesSb.AppendLine("        proxy_set_header X-Real-IP $remote_addr;");
+                            routesSb.AppendLine("        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;");
+                            routesSb.AppendLine("    }");
                         }
-
-                        string safeIdForRoute = domain.Id.ToString().Replace("-", "");
-                        routesSb.AppendLine($"@h_{safeIdForRoute} host {domain.DomainName}");
-                        routesSb.AppendLine($"handle @h_{safeIdForRoute} {{");
-                        routesSb.AppendLine($"    reverse_proxy {domain.OriginIp} {{");
-                        routesSb.AppendLine("        header_up Host {http.request.host}");
-                        routesSb.AppendLine("        header_up X-JA3-Fingerprint {tls.client.ja3_md5}");
-                        routesSb.AppendLine("    }");
+                        else
+                        {
+                            routesSb.AppendLine("    location / {");
+                            routesSb.AppendLine($"        proxy_pass http://{domain.OriginIp};");
+                            routesSb.AppendLine("        proxy_set_header Host $host;");
+                            routesSb.AppendLine("        proxy_set_header X-Real-IP $remote_addr;");
+                            routesSb.AppendLine("        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;");
+                            routesSb.AppendLine("    }");
+                        }
                         routesSb.AppendLine("}");
                         routesSb.AppendLine();
                     }
                 }
             }
 
-            // Always add localhost route for the WAF dashboard frontend & API
-            routesSb.AppendLine("# Route for WAF Dashboard (localhost)");
-            routesSb.AppendLine("@assets {");
-            routesSb.AppendLine("    path /api/* /uploads/*");
-            routesSb.AppendLine("}");
-            routesSb.AppendLine("handle @assets {");
-            routesSb.AppendLine("    reverse_proxy api-dotnet:8080 {");
-            routesSb.AppendLine("        header_up X-JA3-Fingerprint {tls.client.ja3_md5}");
-            routesSb.AppendLine("    }");
-            routesSb.AppendLine("}");
-            routesSb.AppendLine();
-            routesSb.AppendLine("handle {");
-            routesSb.AppendLine("    reverse_proxy host.docker.internal:5173 {");
-            routesSb.AppendLine("        header_up Host {http.request.host}");
-            routesSb.AppendLine("        header_up X-JA3-Fingerprint {tls.client.ja3_md5}");
-            routesSb.AppendLine("    }");
-            routesSb.AppendLine("}");
-            routesSb.AppendLine();
-
             try
             {
                 await File.WriteAllTextAsync(_configPath, sb.ToString());
                 await File.WriteAllTextAsync(_routesPath, routesSb.ToString());
-                _logger.LogInformation($"Wrote WAF configs. Triggering edge reload...");
+                _logger.LogInformation($"Wrote WAF configs. Triggering Nginx reload signal...");
 
-                await ReloadCaddyAsync();
+                await SignalNginxReloadAsync();
             }
             catch (Exception ex)
             {
@@ -234,38 +224,18 @@ namespace AffiniSecurity.Waf.Services
             }
         }
 
-        private async Task ReloadCaddyAsync()
+        private async Task SignalNginxReloadAsync()
         {
             try
             {
-                using var client = new HttpClient();
-                
-                // Caddy expects the Caddyfile in the body for /load, or we can just send the same JSON it currently runs
-                // Wait! To reload, we send the Caddyfile. But the easiest way to reload Caddy via API if the file changed on disk is NOT /load with empty body.
-                // Actually, sending a POST to /load requires the config. 
-                // Alternatively, we can just execute `caddy reload --config /templates/Caddyfile` inside the container, but we are in a different container.
-                // Let's send the Caddyfile content to the API.
-                
-                string caddyfileContent = await File.ReadAllTextAsync("/app/caddy/Caddyfile");
-                
-                var content = new StringContent(caddyfileContent, Encoding.UTF8, "text/caddyfile");
-                client.DefaultRequestHeaders.Add("Cache-Control", "must-revalidate");
-                
-                var response = await client.PostAsync(_caddyApiUrl, content);
-                
-                if (response.IsSuccessStatusCode)
-                {
-                    _logger.LogInformation("WAF Edge Sync Complete. Hot-reload successful.");
-                }
-                else
-                {
-                    string error = await response.Content.ReadAsStringAsync();
-                    _logger.LogError($"WAF Reload failed. Status: {response.StatusCode}. Error: {error}");
-                }
+                // In this local Docker transition, we write a signal file that a sidecar or cron can pick up.
+                // In production Kubernetes, we would update an Ingress or ConfigMap instead.
+                await File.WriteAllTextAsync(_nginxReloadSignalPath, DateTime.UtcNow.ToString());
+                _logger.LogInformation("Nginx reload signal written to shared volume.");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Could not reach the WAF Admin API. Is the coraza-waf container running?");
+                _logger.LogError(ex, "Failed to write Nginx reload signal.");
             }
         }
     }

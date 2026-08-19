@@ -31,8 +31,9 @@ namespace AffiniSecurity.Waf.Middleware
                 return;
             }
 
-            await _next(context);
-            
+            // Capture necessary info before the task starts and HttpContext is disposed
+            var requestHost = context.Request.Host.Host;
+
             // Fire-and-forget background logging to ensure it NEVER blocks the main request
             _ = Task.Run(async () => {
                 try 
@@ -42,13 +43,11 @@ namespace AffiniSecurity.Waf.Middleware
                     var clickhouse = scope.ServiceProvider.GetRequiredService<IClickHouseService>();
                     
                     // Get TenantId (similar to WAFInspector)
-                    string host = context.Request.Host.Host;
-                    var domain = await db.Domains.IgnoreQueryFilters().FirstOrDefaultAsync(d => d.DomainName == host);
+                    var domain = await db.Domains.IgnoreQueryFilters().FirstOrDefaultAsync(d => d.DomainName == requestHost);
                     string? tenantId = domain?.TenantId;
 
-                    // Fallback for testing
                     if (string.IsNullOrEmpty(tenantId)) {
-                        tenantId = "eb880aa3-c981-419f-b0f4-4d9e511788dc"; // nebfikru@gmail.com
+                        tenantId = "global"; 
                     }
 
                     // Log entry to ClickHouse
@@ -61,6 +60,8 @@ namespace AffiniSecurity.Waf.Middleware
                     Console.WriteLine($"[TrafficLog] Async Background Error: {ex.Message}");
                 }
             });
+
+            await _next(context);
         }
     }
 }

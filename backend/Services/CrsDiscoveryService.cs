@@ -13,12 +13,18 @@ namespace AffiniSecurity.Waf.Services
     {
         private readonly IServiceProvider _serviceProvider;
         private readonly ILogger<CrsDiscoveryService> _logger;
-        private const string RulesPath = "/opt/coraza/owasp-crs/rules";
+        private readonly string _rulesPath;
 
-        public CrsDiscoveryService(IServiceProvider serviceProvider, ILogger<CrsDiscoveryService> logger)
+        public CrsDiscoveryService(IServiceProvider serviceProvider, ILogger<CrsDiscoveryService> logger, Microsoft.Extensions.Configuration.IConfiguration configuration)
         {
             _serviceProvider = serviceProvider;
             _logger = logger;
+            
+            var configPath = configuration["Waf:OwaspCrsPath"] ?? "owasp-crs/rules";
+            // If the path is relative, make it relative to the app execution directory
+            _rulesPath = Path.IsPathRooted(configPath) 
+                ? configPath 
+                : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, configPath);
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -86,17 +92,20 @@ namespace AffiniSecurity.Waf.Services
                 var sourceRulesPath = Path.Combine(rootDir, "rules");
                 if (!Directory.Exists(sourceRulesPath)) throw new InvalidOperationException("Failed to find 'rules' folder in CRS archive.");
 
-                _logger.LogInformation("Copying rules to: {Path}", RulesPath);
-                if (!Directory.Exists(RulesPath)) Directory.CreateDirectory(RulesPath);
+                _logger.LogInformation("Copying rules to: {Path}", _rulesPath);
+                if (!Directory.Exists(_rulesPath)) Directory.CreateDirectory(_rulesPath);
 
                 foreach (var file in Directory.GetFiles(sourceRulesPath, "*.*")
                     .Where(f => f.EndsWith(".conf") || f.EndsWith(".data")))
                 {
-                    File.Copy(file, Path.Combine(RulesPath, Path.GetFileName(file)), overwrite: true);
+                    File.Copy(file, Path.Combine(_rulesPath, Path.GetFileName(file)), overwrite: true);
                 }
 
-                _logger.LogInformation("Filesystem updated. Running discovery pass...");
-                return await RunManualDiscoveryAsync();
+                _logger.LogInformation("Filesystem updated. Rules have been downloaded but NOT committed to the DB yet.");
+                
+                // Return the number of rules staged for preview
+                var pendingRules = await ScanRulesAsync(versionTag: null, dryRun: true);
+                return pendingRules.Count;
             }
             finally
             {
@@ -104,6 +113,7 @@ namespace AffiniSecurity.Waf.Services
                 if (Directory.Exists(tempExtractPath)) Directory.Delete(tempExtractPath, true);
             }
         }
+
 
         // Dry-run: returns list of rules on disk that are NOT yet in the database
         public async Task<List<OWASPRule>> PreviewRulesAsync()
@@ -124,16 +134,16 @@ namespace AffiniSecurity.Waf.Services
         {
             var results = new List<OWASPRule>();
 
-            if (!Directory.Exists(RulesPath))
+            if (!Directory.Exists(_rulesPath))
             {
-                _logger.LogWarning("CRS Rules path not found: {Path}. Skipping discovery.", RulesPath);
+                _logger.LogWarning("CRS Rules path not found: {Path}. Skipping discovery.", _rulesPath);
                 return results;
             }
 
             using var scope = _serviceProvider.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<WafDbContext>();
 
-            var confFiles = Directory.GetFiles(RulesPath, "*.conf");
+            var confFiles = Directory.GetFiles(_rulesPath, "*.conf");
             var idRegex = new Regex(@"id:(\d+)", RegexOptions.Compiled);
             var msgRegex = new Regex(@"msg:'([^']+)'|msg:""([^""]+)""", RegexOptions.Compiled);
 
@@ -142,6 +152,10 @@ namespace AffiniSecurity.Waf.Services
                 var content = await File.ReadAllTextAsync(file);
                 var fileName = Path.GetFileName(file);
                 var idMatches = idRegex.Matches(content);
+
+                if (fileName.Contains("test-fake")) {
+                    Console.WriteLine($"[DEBUG] Parsing {fileName}, found {idMatches.Count} matches for 'id:'.");
+                }
 
                 foreach (Match match in idMatches)
                 {
@@ -152,23 +166,38 @@ namespace AffiniSecurity.Waf.Services
                         ? (msgMatch.Groups[1].Value + msgMatch.Groups[2].Value)
                         : $"Rule {ruleId} from {fileName}";
 
-                    var existing = await context.OWASPRules
+                    if (fileName.Contains("test-fake")) {
+                        Console.WriteLine($"[DEBUG] RuleId: {ruleId}. Description: {description}");
+                    }
+
+                    var category = fileName.Contains("SQLI", StringComparison.OrdinalIgnoreCase) ? "SQL Injection" :
+                                   fileName.Contains("XSS", StringComparison.OrdinalIgnoreCase) ? "Cross-Site Scripting" :
+                                   fileName.Contains("LFI", StringComparison.OrdinalIgnoreCase) ? "Local File Inclusion" :
+                                   fileName.Contains("RFI", StringComparison.OrdinalIgnoreCase) ? "Remote File Inclusion" :
+                                   fileName.Contains("RCE", StringComparison.OrdinalIgnoreCase) ? "Remote Code Execution" :
+                                   fileName.Contains("PHP", StringComparison.OrdinalIgnoreCase) ? "PHP Injection" :
+                                   fileName.Contains("JAVA", StringComparison.OrdinalIgnoreCase) ? "Java Injection" :
+                                   fileName.Contains("NODEJS", StringComparison.OrdinalIgnoreCase) ? "Node.js Injection" :
+                                   fileName.Contains("SCANNER", StringComparison.OrdinalIgnoreCase) ? "Scanner Detection" :
+                                   fileName.Contains("LEAKAGE", StringComparison.OrdinalIgnoreCase) ? "Data Leakage" :
+                                   fileName.Contains("PROTOCOL", StringComparison.OrdinalIgnoreCase) ? "Protocol Enforcement" :
+                                   fileName.Contains("DOS", StringComparison.OrdinalIgnoreCase) ? "DoS Protection" :
+                                   fileName.Contains("BOT", StringComparison.OrdinalIgnoreCase) ? "Bot Detection" :
+                                   fileName.Contains("POLICY", StringComparison.OrdinalIgnoreCase) ? "Security Policy" :
+                                   fileName.Contains("FIXATION", StringComparison.OrdinalIgnoreCase) ? "Session Fixation" :
+                                   fileName.Contains("INITIALIZATION", StringComparison.OrdinalIgnoreCase) ? "Initialization" : "General Protection";
+
+                    var existingRule = await context.OWASPRules
                         .IgnoreQueryFilters()
-                        .AnyAsync(r => r.Id == ruleId);
+                        .FirstOrDefaultAsync(r => r.Id == ruleId);
 
-                    if (!existing)
+                    if (existingRule == null)
                     {
-                        var category = fileName.Contains("SQLI", StringComparison.OrdinalIgnoreCase) ? "SQL Injection" :
-                                       fileName.Contains("XSS", StringComparison.OrdinalIgnoreCase) ? "Cross-Site Scripting" :
-                                       fileName.Contains("LFI", StringComparison.OrdinalIgnoreCase) ? "Local File Inclusion" :
-                                       fileName.Contains("RCE", StringComparison.OrdinalIgnoreCase) ? "Remote Code Execution" :
-                                       fileName.Contains("BOT", StringComparison.OrdinalIgnoreCase) ? "Bot Detection" :
-                                       fileName.Contains("PROTOCOL", StringComparison.OrdinalIgnoreCase) ? "Protocol Enforcement" : "General Protection";
-
                         var newRule = new OWASPRule
                         {
                             Id = ruleId,
                             RuleId = ruleId,
+                            TenantId = null,
                             Name = description,
                             Description = $"Part of {fileName}",
                             Category = category,
@@ -179,11 +208,14 @@ namespace AffiniSecurity.Waf.Services
                         };
 
                         results.Add(newRule);
-
-                        if (!dryRun)
-                        {
-                            context.OWASPRules.Add(newRule);
-                        }
+                        if (!dryRun) context.OWASPRules.Add(newRule);
+                    }
+                    else if (!dryRun && (existingRule.Category == "General Protection" || string.IsNullOrEmpty(existingRule.Category) || existingRule.Category == "PROTOCOL"))
+                    {
+                        // Update category if it was previously miscategorized or generic
+                        existingRule.Category = category;
+                        existingRule.VersionTag = versionTag;
+                        results.Add(existingRule);
                     }
                 }
             }

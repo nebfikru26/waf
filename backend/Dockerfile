@@ -3,6 +3,8 @@ WORKDIR /app
 
 # Copy csproj and restore as distinct layers
 COPY *.csproj ./
+ENV DOTNET_HTTP_TIMEOUT=1200
+ENV DOTNET_RESTORE_DISABLE_PARALLEL=true
 RUN dotnet restore
 
 # Copy everything else and build

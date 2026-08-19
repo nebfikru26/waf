@@ -29,7 +29,7 @@ namespace AffiniSecurity.Waf.Middleware
             string? tenantId = context.Items["TenantId"]?.ToString();
             if (string.IsNullOrEmpty(tenantId))
             {
-                tenantId = "eb880aa3-c981-419f-b0f4-4d9e511788dc"; // Default fallback
+                tenantId = "global"; // Unassigned/internal traffic
             }
 
             var thresholds = await db.RiskThresholds.IgnoreQueryFilters().FirstOrDefaultAsync(r => r.TenantId == tenantId) 
