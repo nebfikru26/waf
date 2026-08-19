@@ -60,7 +60,14 @@ spec:
       containers:
       - name: api
         image: affinisecurity/waf-api:latest
+        ports:
+        - containerPort: 8080
+          name: http-api
+        - containerPort: 8082
+          name: http-internal
         env:
+        - name: ASPNETCORE_HTTP_PORTS
+          value: "8080;8082"
         - name: ConnectionStrings__DefaultConnection
           valueFrom:
             secretKeyRef:

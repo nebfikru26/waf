@@ -1,0 +1,50 @@
+# ClusterIP Service for the backend API. Named "api-dotnet" to match the
+# hostname hardcoded in backend/nginx/conf.d/default.conf
+# (set $upstream_api http://api-dotnet:8080;), so cluster DNS resolves it
+# the same way docker-compose's service-name-based DNS does.
+#
+# Intentionally ClusterIP-only (no external exposure) - the
+# api-dotnet-ingress NetworkPolicy in k8s/networkpolicy.yaml further
+# restricts inbound traffic to this Service's pods to nginx-waf pods only.
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-dotnet
+  namespace: affinisecurity-waf
+spec:
+  type: ClusterIP
+  selector:
+    app: api-dotnet
+  ports:
+    - name: http-api
+      protocol: TCP
+      port: 8080
+      targetPort: 8080
+    - name: http-internal
+      protocol: TCP
+      port: 8082
+      targetPort: 8082
+---
+# ClusterIP Service fronting the nginx-waf edge proxy pods. Named
+# "nginx-waf-service" to match the backend.service.name referenced by
+# k8s/ingress.yaml. The Ingress controller (not this Service directly)
+# is what actually receives external traffic; this Service just gives the
+# Ingress a stable ClusterIP + DNS name to route to.
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-waf-service
+  namespace: affinisecurity-waf
+spec:
+  type: ClusterIP
+  selector:
+    app: nginx-waf
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 80
+    - name: https
+      protocol: TCP
+      port: 443
+      targetPort: 443
