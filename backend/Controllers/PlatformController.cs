@@ -63,5 +63,23 @@ namespace AffiniSecurity.Waf.Controllers
                 timestamp = DateTime.UtcNow
             });
         }
+
+        [HttpGet("version")]
+        public IActionResult GetPlatformVersion()
+        {
+            return Ok(new
+            {
+                platform = "AffiniSecurity",
+                version = "2.0",
+                edition = "AI-Native",
+                features = new[] {
+                    "dual-engine-ml-ast",
+                    "ja4-fingerprinting",
+                    "onnx-hot-reload",
+                    "clickhouse-hash-chain-audit"
+                },
+                releaseDate = "2026-07-24"
+            });
+        }
     }
 }

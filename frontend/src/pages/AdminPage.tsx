@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Shield, UserCog, Loader2, CreditCard, Save, Globe, Lock, ShieldCheck, Zap, Bot, Plus, ShieldAlert, Key, UserX, Activity, Eye, History, Bell, BarChart3, Settings, Mail, Phone, Trash2, EyeOff, ArrowRight, Building2, Server, RefreshCw, Scale, Gavel } from "lucide-react";
+import { Shield, UserCog, Loader2, CreditCard, Save, Globe, Lock, ShieldCheck, Zap, Bot, Plus, ShieldAlert, Key, UserX, Activity, Eye, History, Bell, BarChart3, Settings, Mail, Phone, Trash2, EyeOff, ArrowRight, Building2, Server, RefreshCw, Scale, Gavel, LayoutGrid } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -10,7 +10,9 @@ import { useAuth, type Role } from "@/hooks/use-auth";
 import { CmsManager } from "@/components/CmsManager";
 import { WafEngineManager } from "@/components/WafEngineManager";
 import { ComplianceCenter } from "@/components/ComplianceCenter";
+import { TemplateLibrary } from "@/components/TemplateLibrary";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import AdminTenantPage from "@/pages/AdminTenantPage";
 import { useNavigate } from "react-router-dom";
 import {
   Select,
@@ -429,39 +431,25 @@ export default function AdminPage() {
           </TabsContent>
 
           {/* 2. Organizations */}
-          <TabsContent value="organizations" className="pt-4 space-y-6">
-            <div className="flex justify-between items-center bg-muted/20 p-5 rounded-xl border border-dashed border-border shadow-inner">
-              <div className="flex items-center gap-4">
-                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center"><Building2 className="h-5 w-5 text-primary" /></div>
-                <div>
-                  <p className="text-sm font-bold">Tenant Management Directory</p>
-                  <p className="text-xs text-muted-foreground">Monitor platform tenants and impersonate organization admins for direct assistance.</p>
-                </div>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {isLoadingTenants ? (
-                <div className="flex justify-center py-12 lg:col-span-3"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
-              ) : (
-                Array.isArray(tenants) && tenants.map((t) => (
-                  <div key={t.id} className="bg-card border border-border rounded-xl p-5 space-y-4 shadow-sm hover:border-primary/40 transition-all flex flex-col">
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 bg-muted/50 rounded flex items-center justify-center text-xl font-bold text-primary">{(t.name && t.name.length > 0) ? t.name.charAt(0).toUpperCase() : "?"}</div>
-                      <div className="overflow-hidden"><h3 className="font-bold text-sm truncate">{t.name || "Unnamed Organization"}</h3><p className="text-[10px] text-muted-foreground uppercase font-mono tracking-widest truncate">{t.industry || "Unknown Industry"}</p></div>
-                    </div>
-                    <div className="space-y-2 py-2 border-y border-border/50 flex-1">
-                      <div className="flex items-center gap-2 text-xs"><Mail className="h-3 w-3 text-muted-foreground" /><span className="truncate">{t.contactEmail || "N/A"}</span></div>
-                      <div className="flex items-center gap-2 text-xs"><Phone className="h-3 w-3 text-muted-foreground" /><span className="truncate">{t.contactPhone || "N/A"}</span></div>
-                    </div>
-                    <div className="pt-2">
-                      <Button variant="outline" size="sm" className="w-full text-xs font-mono font-bold" onClick={() => impersonateTenant.mutate(t.id)} disabled={impersonateTenant.isPending}>
-                        {impersonateTenant.isPending ? <Loader2 className="h-3 w-3 animate-spin mr-2" /> : <Eye className="h-3 w-3 mr-2" />} IMPERSONATE TENANT
-                      </Button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
+          <TabsContent value="organizations" className="pt-4">
+            <Tabs defaultValue="directory" className="w-full">
+              <TabsList className="bg-muted/30 border border-border/50 p-1 mb-6">
+                <TabsTrigger value="directory" className="text-xs">
+                  <Building2 className="h-3.5 w-3.5 mr-2" /> Tenant Directory
+                </TabsTrigger>
+                <TabsTrigger value="templates" className="text-xs">
+                  <LayoutGrid className="h-3.5 w-3.5 mr-2" /> Golden Images
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="directory">
+                <AdminTenantPage />
+              </TabsContent>
+
+              <TabsContent value="templates">
+                <TemplateLibrary embedded={true} />
+              </TabsContent>
+            </Tabs>
           </TabsContent>
 
           {/* 3. WAF Engine */}

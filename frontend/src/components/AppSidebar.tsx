@@ -17,7 +17,8 @@ import {
   BellRing,
   Eye,
   Gauge,
-  Building2,
+  LayoutGrid,
+  BrainCircuit,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth, type AuthUser, type Role } from "@/hooks/use-auth";
@@ -38,10 +39,10 @@ import { Button } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
 import { Logo } from "@/components/Logo";
 
-interface NavItem { 
-  title: string; 
-  url: string; 
-  icon: React.ElementType; 
+interface NavItem {
+  title: string;
+  url: string;
+  icon: React.ElementType;
   roles: Role[];
   requiredFeature?: keyof AuthUser["entitlements"];
 }
@@ -53,10 +54,12 @@ const TENANT_ROLES: Role[] = ["tenant_admin", "security_engineer", "security_ana
 
 // PLATFORM ADMIN nav — system-level management only
 const adminMainNav: NavItem[] = [
+  { title: "Admin Center", url: "/admin", icon: Shield, roles: ["super_admin", "support_engineer", "admin"] },
   { title: "Platform Overview", url: "/", icon: LayoutDashboard, roles: ["super_admin", "support_engineer", "admin"] },
-  { title: "Admin Center", url: "/admin", icon: Shield, roles: ["super_admin", "admin"] },
   { title: "OWASP CRS v3.3", url: "/crs-rules", icon: ShieldCheck, roles: ["super_admin"] },
   { title: "CRS Threat Intelligence", url: "/crs-dashboard", icon: BarChart3, roles: ["super_admin"] },
+  { title: "AI Threat Intelligence", url: "/admin/ai-threats", icon: BrainCircuit, roles: ["super_admin", "admin"] },
+  { title: "Golden Image Hub", url: "/admin/templates", icon: LayoutGrid, roles: ["super_admin", "admin"] },
   { title: "User Management", url: "/users", icon: UserCog, roles: ["super_admin", "support_engineer", "admin"] },
   { title: "Audit & Compliance", url: "/audit-logs", icon: Shield, roles: ["super_admin", "admin", "support_engineer"] },
   { title: "My Profile", url: "/profile", icon: User, roles: ["super_admin", "support_engineer", "admin"] },
@@ -88,6 +91,7 @@ const monitoringNav: NavItem[] = [
   { title: "Alerts & Logs", url: "/alerts", icon: AlertTriangle, roles: ["tenant_admin", "security_engineer", "security_analyst", "customer", "analyst"], requiredFeature: "hasAttackLogs" },
   { title: "Instant Alerts", url: "/instant-alerts", icon: BellRing, roles: ["tenant_admin", "security_engineer", "security_analyst", "customer", "analyst"], requiredFeature: "hasNotifications" },
   { title: "Analytics", url: "/analytics", icon: BarChart3, roles: ["tenant_admin", "security_engineer", "security_analyst", "billing_admin", "customer", "analyst"], requiredFeature: "hasAnalytics" },
+  { title: "MITRE Mapping", url: "/mitre-mapping", icon: ShieldCheck, roles: ["tenant_admin", "security_engineer", "security_analyst", "customer", "analyst"] },
 ];
 
 export function AppSidebar() {
@@ -104,7 +108,7 @@ export function AppSidebar() {
       {items.map((item) => {
         const isPlatformAdmin = user?.role === "super_admin" || user?.role === "admin" || user?.role === "support_engineer";
         const isLocked = !isPlatformAdmin && item.requiredFeature && user && !user.entitlements[item.requiredFeature];
-        
+
         return (
           <SidebarMenuItem key={item.title}>
             <SidebarMenuButton asChild>
@@ -136,13 +140,23 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="border-b border-border/50 py-4 px-4">
-        <Logo 
-          showText={!collapsed} 
+        <Logo
+          showText={!collapsed}
           className="h-16 w-full -ml-1"
         />
+        {!collapsed && (
+          <div className="flex justify-center -mt-3 pb-2">
+            <span className="inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/15 shadow-sm">
+              v2.0 &middot; AI-Native
+            </span>
+          </div>
+        )}
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
+          <SidebarGroupLabel className="px-3 text-[10px] uppercase tracking-widest text-muted-foreground">
+            {!collapsed && (isAdmin ? t("Admin Center") : t("Organization"))}
+          </SidebarGroupLabel>
           <SidebarGroupContent>
             {renderNav(filterByRole(mainNav))}
           </SidebarGroupContent>

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import {
   ShieldCheck, Plus, Trash2, MapPin, Loader2, Check, Copy,
   Zap, Filter, ChevronDown, ChevronRight, X, Save, Ban, Search, Download, Upload, History, Beaker, Pencil, RotateCcw, Play, ShieldAlert,
-  RefreshCw
+  RefreshCw, ChevronLeft, ChevronsUpDown, ChevronUp, Sparkles, Clock, CheckCircle2, Globe, Activity, Settings, Lock, Server, Shield
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DashboardLayout } from "@/components/DashboardLayout";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { UpgradeOverlay } from "@/components/UpgradeOverlay";
@@ -26,6 +27,7 @@ interface OWASPRule {
   description: string;
   action: string;
   severity?: string;
+  imported_at?: string;
 }
 
 const OWASPRuleRow = React.memo(({
@@ -98,6 +100,11 @@ const OWASPRuleRow = React.memo(({
               {rule.description}
             </p>
           </div>
+          {rule.imported_at && new Date().getTime() - new Date(rule.imported_at).getTime() < 7 * 24 * 60 * 60 * 1000 && (
+            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-500 text-[9px] font-bold border border-blue-500/20 animate-pulse ml-1">
+              <Sparkles className="h-2.5 w-2.5" /> NEW
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <div className="flex gap-1.5 items-center">
@@ -581,7 +588,7 @@ function CustomRuleBuilder({ initialRule, onSave, onCancel, token }: {
 
 // ─── Main Page ────────────────────────────────────────
 export default function PoliciesPage() {
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
   const qc = useQueryClient();
 
@@ -609,6 +616,7 @@ export default function PoliciesPage() {
   const [geoAllowlist, setGeoAllowlist] = useState<string[]>(ETHIOPIAN_NEIGHBORS);
   const [geoBlocklist, setGeoBlocklist] = useState<string[]>(["RU", "CN", "KP", "IR"]);
   const [rateLimit, setRateLimit] = useState("100");
+  const [mlDetectionEnabled, setMlDetectionEnabled] = useState(true);
   const [rateSaving, setRateSaving] = useState(false);
   const [customRulesOpen, setCustomRulesOpen] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");
@@ -616,6 +624,11 @@ export default function PoliciesPage() {
   const [showHistory, setShowHistory] = useState(false);
   const [selectedHistoryRule, setSelectedHistoryRule] = useState<CustomRule | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
+
+  // OWASP Rules Sorting & Pagination State
+  const [sortKeyOwasp, setSortKeyOwasp] = useState<"rule_id" | "name" | "category" | "severity" | "action">("rule_id");
+  const [sortDirOwasp, setSortDirOwasp] = useState<"asc" | "desc">("asc");
+  const [currentOwaspPage, setCurrentOwaspPage] = useState(1);
 
   // Persistent UI State to survive reloads/HMR
   const [libraryTab, setLibraryTab] = useState<"custom" | "owasp">(() => {
@@ -632,8 +645,14 @@ export default function PoliciesPage() {
 
   // Sync state to sessionStorage
   useEffect(() => { sessionStorage.setItem("waf_policies_tab", libraryTab); }, [libraryTab]);
-  useEffect(() => { sessionStorage.setItem("waf_policies_search", searchQuery); }, [searchQuery]);
+  useEffect(() => {
+    sessionStorage.setItem("waf_policies_search", searchQuery);
+    setCurrentOwaspPage(1); // Reset page on search
+  }, [searchQuery]);
   useEffect(() => { sessionStorage.setItem("waf_policies_expanded", JSON.stringify(expandedOwaspRules)); }, [expandedOwaspRules]);
+
+  // Reset page when other filters change
+  useEffect(() => { setCurrentOwaspPage(1); }, [statusFilter, catFilter, sortKeyOwasp, sortDirOwasp]);
 
   // Scroll Persistence
   useEffect(() => {
@@ -655,11 +674,11 @@ export default function PoliciesPage() {
     setExpandedOwaspRules(prev => ({ ...prev, [rId]: !prev[rId] }));
   };
 
-  const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
-  const headers = {
+  const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || "";
+  const headers = React.useMemo(() => ({
     "Content-Type": "application/json",
-    "Authorization": `Bearer ${token}`
-  };
+    "Authorization": `Bearer ${localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token") || ""}`
+  }), [user]);
 
   // Queries
 
@@ -667,6 +686,7 @@ export default function PoliciesPage() {
   const { data: ipRules = [] } = useQuery<IPRule[]>({
     queryKey: ["ip-rules"],
     queryFn: () => fetch("/api/firewall/rules", { headers }).then(r => r.json()),
+    enabled: !authLoading && !!user
   });
 
   const { data: uriExclusions = [] } = useQuery<any[]>({
@@ -676,7 +696,7 @@ export default function PoliciesPage() {
       if (!res.ok) throw new Error("Failed to load exclusions");
       return res.json();
     },
-    enabled: !!token
+    enabled: !authLoading && !!user
   });
 
   const { data: owaspExclusions = [] } = useQuery<OWASPRuleExclusion[]>({
@@ -686,7 +706,7 @@ export default function PoliciesPage() {
       if (!res.ok) throw new Error("Failed to load owasp exclusions");
       return res.json();
     },
-    enabled: !!token,
+    enabled: !authLoading && !!user,
     staleTime: 300000 // 5 minutes
   });
 
@@ -696,6 +716,7 @@ export default function PoliciesPage() {
       if (!r.ok) throw new Error(`Failed to fetch custom rules: ${r.status}`);
       return r.json();
     }),
+    enabled: !authLoading && !!user
   });
 
   const { data: owaspRules = [], refetch: refetchOwasp } = useQuery<OWASPRule[]>({
@@ -704,7 +725,8 @@ export default function PoliciesPage() {
       if (!r.ok) throw new Error(`Failed to fetch OWASP rules: ${r.status}`);
       return r.json();
     }),
-    staleTime: 600000 // 10 minutes
+    staleTime: 60000, // 1 minute (reduced to allow more frequent refetch)
+    enabled: !authLoading && !!user
   });
 
   const fetchHistory = async (ruleId: string) => {
@@ -765,6 +787,7 @@ export default function PoliciesPage() {
 
   const { data: settings } = useQuery({
     queryKey: ["firewall-settings"],
+    enabled: !authLoading && !!user,
     queryFn: () => fetch("/api/firewall/settings", { headers }).then(r => {
       if (!r.ok) throw new Error(`Failed to fetch firewall settings: ${r.status}`);
       return r.json();
@@ -781,6 +804,7 @@ export default function PoliciesPage() {
       setGeoAllowlist(settings.geo_allowlist?.split(",") || ETHIOPIAN_NEIGHBORS);
       setGeoBlocklist(settings.geo_blocklist?.split(",") || ["RU", "CN", "KP", "IR"]);
       setRateLimit(String(settings.rate_limit_rps || "100"));
+      setMlDetectionEnabled(!!settings.ml_detection_enabled);
       // Only sync from backend if we're not in the middle of a manual toggle
       if (!modeLoading) {
         setWafMode(settings.waf_mode === "prevention" ? "BLOCK" : "SIMULATE");
@@ -797,12 +821,14 @@ export default function PoliciesPage() {
       const res = await fetch("/api/firewall/settings", {
         method: "PUT", headers,
         body: JSON.stringify({
+          ...settings,
           tenant_id: user?.tenantId,
           geo_enabled: geoEnabled,
           geo_mode: geoMode,
           geo_allowlist: geoAllowlist.join(","),
           geo_blocklist: geoBlocklist.join(","),
-          rate_limit_rps: parseInt(rateLimit) || 100
+          rate_limit_rps: parseInt(rateLimit) || 100,
+          ml_detection_enabled: mlDetectionEnabled
         }),
       });
       if (res.ok) {
@@ -1014,6 +1040,61 @@ export default function PoliciesPage() {
     }
   };
 
+  const OwaspPagination = ({ className = "" }: { className?: string }) => {
+    if (totalOwaspPages <= 1) return null;
+
+    return (
+      <div className={`px-4 py-3 flex items-center justify-between border rounded-lg bg-muted/10 ${className}`}>
+        <div className="text-[10px] text-muted-foreground uppercase font-mono">
+          Showing <span className="text-foreground font-bold">{Math.min(filteredOwaspRules.length, (currentOwaspPage - 1) * OWASP_ITEMS_PER_PAGE + 1)}-{Math.min(filteredOwaspRules.length, currentOwaspPage * OWASP_ITEMS_PER_PAGE)}</span> of <span className="text-foreground font-bold">{filteredOwaspRules.length}</span> Rules
+        </div>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => setCurrentOwaspPage(p => Math.max(1, p - 1))}
+            disabled={currentOwaspPage === 1}
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+
+          <div className="flex items-center gap-1 px-2">
+            {[...Array(Math.min(5, totalOwaspPages))].map((_, i) => {
+              let pageNum = currentOwaspPage;
+              if (currentOwaspPage <= 3) pageNum = i + 1;
+              else if (currentOwaspPage >= totalOwaspPages - 2) pageNum = totalOwaspPages - 4 + i;
+              else pageNum = currentOwaspPage - 2 + i;
+
+              if (pageNum <= 0 || pageNum > totalOwaspPages) return null;
+
+              return (
+                <Button
+                  key={pageNum}
+                  variant={currentOwaspPage === pageNum ? "default" : "outline"}
+                  className={`h-7 w-7 text-[10px] font-mono ${currentOwaspPage === pageNum ? 'glow-primary' : ''}`}
+                  onClick={() => setCurrentOwaspPage(pageNum)}
+                >
+                  {pageNum}
+                </Button>
+              );
+            })}
+          </div>
+
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => setCurrentOwaspPage(p => Math.min(totalOwaspPages, p + 1))}
+            disabled={currentOwaspPage === totalOwaspPages}
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
   const actionBadge = (action: string) => {
     const map: Record<string, string> = {
       BLOCK: "text-red-400 border-red-400/30 bg-red-400/8",
@@ -1083,24 +1164,113 @@ export default function PoliciesPage() {
 
   const safeOwaspRules = Array.isArray(owaspRules) ? owaspRules : [];
 
-  const filteredOwaspRules = React.useMemo(() => safeOwaspRules.filter(r => {
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      if (!r.name.toLowerCase().includes(q) &&
-        !(r.description || "").toLowerCase().includes(q) &&
-        !(r.id || "").toLowerCase().includes(q) &&
-        !(r.rule_id || "").toLowerCase().includes(q)) return false;
+  const latestOwaspSync = React.useMemo(() => {
+    if (!safeOwaspRules.length) return null;
+    const dates = safeOwaspRules.map(r => r.imported_at ? new Date(r.imported_at).getTime() : 0).filter(d => d > 0);
+    if (!dates.length) return null;
+    return new Date(Math.max(...dates));
+  }, [safeOwaspRules]);
+
+  const SortIcon = ({ col }: { col: typeof sortKeyOwasp }) => {
+    if (sortKeyOwasp !== col) return <ChevronsUpDown className="h-3 w-3 ml-1 opacity-30 inline" />;
+    return sortDirOwasp === "asc"
+      ? <ChevronUp className="h-3 w-3 ml-1 text-primary inline" />
+      : <ChevronDown className="h-3 w-3 ml-1 text-primary inline" />;
+  };
+
+  const toggleSortOwasp = (key: typeof sortKeyOwasp) => {
+    if (sortKeyOwasp === key) {
+      setSortDirOwasp(d => d === "asc" ? "desc" : "asc");
+    } else {
+      setSortKeyOwasp(key);
+      setSortDirOwasp("asc");
     }
-    if (statusFilter !== "all") {
-      if (statusFilter === "enabled" && r.action === "DISABLED") return false;
-      if (statusFilter === "disabled" && r.action !== "DISABLED") return false;
-      if (["BLOCK", "LOG", "CHALLENGE", "ALLOW"].includes(statusFilter) && r.action !== statusFilter) return false;
-    }
-    if (catFilter !== "all") {
-      if ((r.category || "OWASP").toLowerCase() !== catFilter.toLowerCase()) return false;
-    }
-    return true;
-  }), [safeOwaspRules, searchQuery, statusFilter, catFilter]);
+  };
+
+  const OwaspSortHeader = () => (
+    <div className="flex items-center justify-between px-4 py-2 bg-muted/30 border border-border/50 rounded-lg mb-2 text-[10px] uppercase font-bold tracking-wider text-muted-foreground select-none">
+      <div className="flex items-center gap-3 flex-1 overflow-hidden">
+        <div className="w-8 shrink-0" /> {/* Chevron placeholder */}
+        <div onClick={() => toggleSortOwasp("rule_id")} className="w-14 shrink-0 cursor-pointer hover:text-primary transition-colors flex items-center">
+          ID <SortIcon col="rule_id" />
+        </div>
+        <div onClick={() => toggleSortOwasp("name")} className="flex-1 cursor-pointer hover:text-primary transition-colors flex items-center min-w-0">
+          Name & Description <SortIcon col="name" />
+        </div>
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        <div onClick={() => toggleSortOwasp("category")} className="w-[80px] cursor-pointer hover:text-primary transition-colors flex items-center">
+          Category <SortIcon col="category" />
+        </div>
+        <div onClick={() => toggleSortOwasp("severity")} className="w-[80px] cursor-pointer hover:text-primary transition-colors flex items-center">
+          Severity <SortIcon col="severity" />
+        </div>
+        <div onClick={() => toggleSortOwasp("action")} className="w-[110px] cursor-pointer hover:text-primary transition-colors flex items-center">
+          Action <SortIcon col="action" />
+        </div>
+      </div>
+    </div>
+  );
+
+  const filteredOwaspRules = React.useMemo(() => {
+    const filtered = safeOwaspRules.filter(r => {
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        if (!r.name.toLowerCase().includes(q) &&
+          !(r.description || "").toLowerCase().includes(q) &&
+          !(r.id || "").toLowerCase().includes(q) &&
+          !(r.rule_id || "").toLowerCase().includes(q)) return false;
+      }
+      if (statusFilter !== "all") {
+        if (statusFilter === "enabled" && r.action === "DISABLED") return false;
+        if (statusFilter === "disabled" && r.action !== "DISABLED") return false;
+        if (["BLOCK", "LOG", "CHALLENGE", "ALLOW"].includes(statusFilter) && r.action !== statusFilter) return false;
+      }
+      if (catFilter !== "all") {
+        if ((r.category || "OWASP").toLowerCase() !== catFilter.toLowerCase()) return false;
+      }
+      return true;
+    });
+
+    const SEVERITY_ORDER: Record<string, number> = { CRITICAL: 0, ERROR: 1, WARNING: 2, MEDIUM: 3, LOW: 4, NOTICE: 5 };
+
+    return [...filtered].sort((a, b) => {
+      let aVal: string | number = "";
+      let bVal: string | number = "";
+
+      const key = sortKeyOwasp;
+      if (key === "rule_id") {
+        aVal = a.rule_id || (a as any).ruleId || a.id.split('-')[0];
+        bVal = b.rule_id || (b as any).ruleId || b.id.split('-')[0];
+      } else if (key === "name") {
+        aVal = a.name;
+        bVal = b.name;
+      } else if (key === "category") {
+        aVal = a.category || "OWASP";
+        bVal = b.category || "OWASP";
+      } else if (key === "severity") {
+        aVal = SEVERITY_ORDER[a.severity || "NOTICE"] ?? 99;
+        bVal = SEVERITY_ORDER[b.severity || "NOTICE"] ?? 99;
+      } else if (key === "action") {
+        aVal = a.action;
+        bVal = b.action;
+      }
+
+      if (typeof aVal === "number" && typeof bVal === "number") {
+        return sortDirOwasp === "asc" ? aVal - bVal : bVal - aVal;
+      }
+      return sortDirOwasp === "asc"
+        ? String(aVal).localeCompare(String(bVal))
+        : String(bVal).localeCompare(String(aVal));
+    });
+  }, [safeOwaspRules, searchQuery, statusFilter, catFilter, sortKeyOwasp, sortDirOwasp]);
+
+  const OWASP_ITEMS_PER_PAGE = 50;
+  const totalOwaspPages = Math.ceil(filteredOwaspRules.length / OWASP_ITEMS_PER_PAGE);
+  const paginatedOwaspRules = React.useMemo(() => {
+    const start = (currentOwaspPage - 1) * OWASP_ITEMS_PER_PAGE;
+    return filteredOwaspRules.slice(start, start + OWASP_ITEMS_PER_PAGE);
+  }, [filteredOwaspRules, currentOwaspPage]);
 
   const safeIpRules = Array.isArray(ipRules) ? ipRules : [];
   const whitelist = React.useMemo(() => safeIpRules.filter((r) => r.rule_type === "whitelist"), [safeIpRules]);
@@ -1125,384 +1295,536 @@ export default function PoliciesPage() {
           </span>
         </div>
 
-        {/* Global Enforcement Mode */}
-        <div className="bg-card border border-border rounded-xl p-6 shadow-md relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-8 bg-primary/5 rounded-bl-full pointer-events-none" />
-          <div className="flex flex-col md:flex-row items-center justify-between gap-6 relative z-10">
-            <div className="flex items-center gap-4">
-              <div className={`h-12 w-12 rounded-full flex items-center justify-center border-4 border-background shadow-lg transition-all duration-500 ${wafMode === "BLOCK" ? "bg-red-500 text-white animate-pulse" : "bg-amber-500 text-white"}`}>
-                <ShieldCheck className="h-6 w-6" />
+        <Tabs defaultValue="shield" className="space-y-6">
+          <TabsList className="bg-muted/40 border border-border p-1 h-12 w-full md:w-auto overflow-x-auto justify-start flex-nowrap scrollbar-none">
+            <TabsTrigger value="shield" className="gap-2 px-4 py-2 data-[state=active]:glow-primary">
+              <Shield className="h-4 w-4" /> Shield
+            </TabsTrigger>
+            <TabsTrigger value="network" className="gap-2 px-4 py-2 data-[state=active]:glow-primary">
+              <Globe className="h-4 w-4" /> Network
+            </TabsTrigger>
+            <TabsTrigger value="application" className="gap-2 px-4 py-2 data-[state=active]:glow-primary">
+              <Lock className="h-4 w-4" /> Application
+            </TabsTrigger>
+            <TabsTrigger value="tooling" className="gap-2 px-4 py-2 data-[state=active]:glow-primary">
+              <Settings className="h-4 w-4" /> Tooling
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="shield" className="space-y-6 mt-0">
+            {/* Global Enforcement Mode */}
+            <div className="bg-card border border-border rounded-xl p-6 shadow-md relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-8 bg-primary/5 rounded-bl-full pointer-events-none" />
+              <div className="flex flex-col md:flex-row items-center justify-between gap-6 relative z-10">
+                <div className="flex items-center gap-4">
+                  <div className={`h-12 w-12 rounded-full flex items-center justify-center border-4 border-background shadow-lg transition-all duration-500 ${wafMode === "BLOCK" ? "bg-red-500 text-white animate-pulse" : "bg-amber-500 text-white"}`}>
+                    <ShieldCheck className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold flex items-center gap-2">
+                      Global Enforcement Mode: <span className={wafMode === "BLOCK" ? "text-red-500" : "text-amber-500"}>{wafMode === "BLOCK" ? "PREVENTION" : "DETECTION"}</span>
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                      {wafMode === "BLOCK"
+                        ? "Malicious requests are actively blocked and dropped at the edge."
+                        : "Malicious requests are logged and tagged but allowed to pass for analysis."}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex bg-muted/50 p-1 rounded-xl border border-border">
+                  <button
+                    disabled={!canManageSecurityPolicies || modeLoading}
+                    onClick={async () => {
+                      setModeLoading(true);
+                      try {
+                        const res = await fetch("/api/firewall/mode", {
+                          method: "POST", headers, body: JSON.stringify({ mode: "SIMULATE" })
+                        });
+                        if (res.ok) {
+                          setWafMode("SIMULATE");
+                          await qc.invalidateQueries({ queryKey: ["firewall-settings"] });
+                          toast({ title: "WAF set to DETECTION mode" });
+                        }
+                      } catch (e) {
+                        toast({ title: "Failed to update mode", variant: "destructive" });
+                      } finally { setModeLoading(false); }
+                    }}
+                    className={`px-6 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${wafMode === "SIMULATE" ? "bg-card shadow-sm text-amber-500 border border-amber-500/20" : "text-muted-foreground hover:text-foreground border border-transparent"}`}
+                  >
+                    {modeLoading && wafMode === "SIMULATE" && <Loader2 className="h-3 w-3 animate-spin" />}
+                    SIMULATE (LOG ONLY)
+                  </button>
+                  <button
+                    disabled={!canManageSecurityPolicies || modeLoading}
+                    onClick={async () => {
+                      setModeLoading(true);
+                      try {
+                        const res = await fetch("/api/firewall/mode", {
+                          method: "POST", headers, body: JSON.stringify({ mode: "BLOCK" })
+                        });
+                        if (res.ok) {
+                          setWafMode("BLOCK");
+                          await qc.invalidateQueries({ queryKey: ["firewall-settings"] });
+                          toast({ title: "WAF set to PREVENTION mode" });
+                        }
+                      } catch (e) {
+                        toast({ title: "Failed to update mode", variant: "destructive" });
+                      } finally { setModeLoading(false); }
+                    }}
+                    className={`px-6 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${wafMode === "BLOCK" ? "bg-red-500 text-white shadow-lg shadow-red-500/20 border border-red-400" : "text-muted-foreground hover:text-foreground border border-transparent"}`}
+                  >
+                    {modeLoading && wafMode === "BLOCK" && <Loader2 className="h-3 w-3 animate-spin" />}
+                    BLOCK (PREVENT)
+                  </button>
+                </div>
               </div>
-              <div>
-                <h2 className="text-lg font-bold flex items-center gap-2">
-                  Global Enforcement Mode: <span className={wafMode === "BLOCK" ? "text-red-500" : "text-amber-500"}>{wafMode === "BLOCK" ? "PREVENTION" : "DETECTION"}</span>
-                </h2>
-                <p className="text-xs text-muted-foreground">
-                  {wafMode === "BLOCK"
-                    ? "Malicious requests are actively blocked and dropped at the edge."
-                    : "Malicious requests are logged and tagged but allowed to pass for analysis."}
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {/* Geo-Filtering Section */}
+                <div className="bg-card border border-border rounded-xl p-5 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2">
+                        <MapPin className="h-5 w-5 text-primary" />
+                        <div>
+                          <h3 className="text-sm font-bold">Regional Geo-Filtering</h3>
+                          <p className="text-[11px] text-muted-foreground">Enforce regional access policies</p>
+                        </div>
+                      </div>
+                      <Switch checked={geoEnabled} onCheckedChange={setGeoEnabled} disabled={!canManageSecurityPolicies} />
+                    </div>
+                  </div>
+                  {geoEnabled && (
+                    <div className="flex justify-between items-center gap-2 mt-4">
+                      <Select onValueChange={(c) => c && !geoAllowlist.includes(c) && setGeoAllowlist(p => [...p, c])}>
+                        <SelectTrigger className="h-8 text-[10px] w-full"><SelectValue placeholder="Add Country..." /></SelectTrigger>
+                        <SelectContent className="max-h-48">
+                          {COUNTRIES.map(c => <SelectItem key={c} value={c} className="text-[10px]">{c}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <Button size="sm" variant="outline" className="h-8 text-[10px]" onClick={saveSettings}>Apply</Button>
+                    </div>
+                  )}
+                </div>
+
+                {/* AI Semantic Engine */}
+                <div className="bg-card border border-border rounded-xl p-5 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2">
+                        <Zap className="h-5 w-5 text-indigo-500 animate-pulse" />
+                        <div>
+                          <h3 className="text-sm font-bold flex items-center gap-1.5">
+                            AI Semantic Engine
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase ${mlDetectionEnabled ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' : 'bg-muted text-muted-foreground'}`}>
+                              {mlDetectionEnabled ? 'Active' : 'Disabled'}
+                            </span>
+                          </h3>
+                          <p className="text-[11px] text-muted-foreground">Heuristic & anomaly detection shielding</p>
+                        </div>
+                      </div>
+                      <Switch checked={mlDetectionEnabled} onCheckedChange={setMlDetectionEnabled} disabled={!canManageSecurityPolicies} />
+                    </div>
+                  </div>
+                  <div className="flex justify-end mt-4">
+                    <Button size="sm" variant="outline" className="h-8 text-[10px] border-indigo-500/30 hover:border-indigo-500 text-indigo-400 hover:text-indigo-300" onClick={saveSettings}>Apply</Button>
+                  </div>
+                </div>
+
+                {/* Rate Limiting */}
+                <div className="bg-card border border-border rounded-xl p-5 flex flex-col justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold mb-2">Rate Limiting</h3>
+                    <p className="text-[11px] text-muted-foreground mb-4">Request count threshold per second</p>
+                    <div className="flex items-center gap-2">
+                      <Input type="number" value={rateLimit} onChange={e => setRateLimit(e.target.value)} className="h-8 font-mono text-xs w-20" />
+                      <Button size="sm" className="h-8 text-xs underline decoration-primary/30" variant="ghost" onClick={saveSettings}>Update</Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="network" className="space-y-6 mt-0">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Allowlist */}
+              <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
+                <h3 className="text-sm font-bold mb-3 text-emerald-400 flex items-center gap-2 uppercase tracking-tight">
+                  <Zap className="h-4 w-4" /> IP Allowlist
+                </h3>
+                <p className="text-[11px] text-muted-foreground mb-4 leading-relaxed">
+                  Traffic from these IPs will bypass all security checks. Use this for trusted partners, office IPs, or automated testing services.
                 </p>
-              </div>
-            </div>
-
-            <div className="flex bg-muted/50 p-1 rounded-xl border border-border">
-              <button
-                disabled={!canManageSecurityPolicies || modeLoading}
-                onClick={async () => {
-                  setModeLoading(true);
-                  try {
-                    const res = await fetch("/api/firewall/mode", {
-                      method: "POST", headers, body: JSON.stringify({ mode: "SIMULATE" })
-                    });
-                    if (res.ok) {
-                      setWafMode("SIMULATE");
-                      await qc.invalidateQueries({ queryKey: ["firewall-settings"] });
-                      toast({ title: "WAF set to DETECTION mode" });
-                    }
-                  } catch (e) {
-                    toast({ title: "Failed to update mode", variant: "destructive" });
-                  } finally { setModeLoading(false); }
-                }}
-                className={`px-6 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${wafMode === "SIMULATE" ? "bg-card shadow-sm text-amber-500 border border-amber-500/20" : "text-muted-foreground hover:text-foreground border border-transparent"}`}
-              >
-                {modeLoading && wafMode === "SIMULATE" && <Loader2 className="h-3 w-3 animate-spin" />}
-                SIMULATE (LOG ONLY)
-              </button>
-              <button
-                disabled={!canManageSecurityPolicies || modeLoading}
-                onClick={async () => {
-                  setModeLoading(true);
-                  try {
-                    const res = await fetch("/api/firewall/mode", {
-                      method: "POST", headers, body: JSON.stringify({ mode: "BLOCK" })
-                    });
-                    if (res.ok) {
-                      setWafMode("BLOCK");
-                      await qc.invalidateQueries({ queryKey: ["firewall-settings"] });
-                      toast({ title: "WAF set to PREVENTION mode" });
-                    }
-                  } catch (e) {
-                    toast({ title: "Failed to update mode", variant: "destructive" });
-                  } finally { setModeLoading(false); }
-                }}
-                className={`px-6 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${wafMode === "BLOCK" ? "bg-red-500 text-white shadow-lg shadow-red-500/20 border border-red-400" : "text-muted-foreground hover:text-foreground border border-transparent"}`}
-              >
-                {modeLoading && wafMode === "BLOCK" && <Loader2 className="h-3 w-3 animate-spin" />}
-                BLOCK (PREVENT)
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Allowlist */}
-          <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
-            <h3 className="text-sm font-bold mb-3 text-emerald-400 flex items-center gap-2 uppercase tracking-tight">
-              <Zap className="h-4 w-4" /> IP Allowlist
-            </h3>
-            <p className="text-[11px] text-muted-foreground mb-4 leading-relaxed">
-              Traffic from these IPs will bypass all security checks. Use this for trusted partners, office IPs, or automated testing services.
-            </p>
-            {canManageSecurityPolicies && (
-              <div className="flex gap-2 mb-4">
-                <Input placeholder="e.g. 196.188.1.1" value={newWhiteIp} onChange={e => setNewWhiteIp(e.target.value)}
-                  className="bg-muted/50 text-xs font-mono h-9" onKeyDown={e => e.key === "Enter" && addIPRule("whitelist")} />
-                <Button size="sm" className="shrink-0 bg-emerald-600 hover:bg-emerald-700 h-9 px-3" onClick={() => addIPRule("whitelist")}>
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </div>
-            )}
-            <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1 custom-scrollbar">
-              {whitelist.map(ip => (
-                <div key={ip.id} className="flex items-center justify-between py-2 px-3 rounded-lg text-xs font-mono bg-emerald-500/5 border border-emerald-500/10 hover:bg-emerald-500/10 transition-colors">
-                  <span className="text-emerald-400">{ip.ip_address}</span>
-                  {canManageSecurityPolicies && <button onClick={() => removeIPRule(ip.id)} className="text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="h-3.5 w-3.5" /></button>}
-                </div>
-              ))}
-              {whitelist.length === 0 && <div className="text-xs text-muted-foreground py-8 text-center bg-muted/5 rounded-lg border border-dashed border-border">No allowed IPs configured</div>}
-            </div>
-          </div>
-
-          {/* Blocklist */}
-          <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
-            <h3 className="text-sm font-bold mb-3 text-red-400 flex items-center gap-2 uppercase tracking-tight">
-              <Ban className="h-4 w-4" /> IP Blocklist
-            </h3>
-            <p className="text-[11px] text-muted-foreground mb-4 leading-relaxed">
-              Explicitly block malicious IPs or ranges. These IPs are dropped immediately at the edge before any further processing.
-            </p>
-            {canManageSecurityPolicies && (
-              <div className="flex gap-2 mb-4">
-                <Input placeholder="e.g. 203.0.113.5" value={newBlackIp} onChange={e => setNewBlackIp(e.target.value)}
-                  className="bg-muted/50 text-xs font-mono h-9" onKeyDown={e => e.key === "Enter" && addIPRule("blacklist")} />
-                <Button size="sm" variant="destructive" className="shrink-0 h-9 px-3" onClick={() => addIPRule("blacklist")}>
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </div>
-            )}
-            <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1 custom-scrollbar">
-              {blacklist.map(ip => (
-                <div key={ip.id} className="flex items-center justify-between py-2 px-3 rounded-lg text-xs font-mono bg-red-500/5 border border-red-500/10 hover:bg-red-500/10 transition-colors">
-                  <span className="text-red-400">{ip.ip_address}</span>
-                  {canManageSecurityPolicies && <button onClick={() => removeIPRule(ip.id)} className="text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="h-3.5 w-3.5" /></button>}
-                </div>
-              ))}
-              {blacklist.length === 0 && <div className="text-xs text-muted-foreground py-8 text-center bg-muted/5 rounded-lg border border-dashed border-border">No blocked IPs configured</div>}
-            </div>
-          </div>
-        </div>
-
-        {/* Rule Library Panel */}
-        <div className="border border-border/80 bg-card rounded-xl p-5 shadow-sm space-y-4 relative">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-semibold flex items-center gap-2">
-                <ShieldCheck className="h-4 w-4 text-primary" /> Rule Library
-              </h3>
-              <p className="text-[11px] text-muted-foreground mt-0.5">Central repository of all WAF rules (OWASP Core Rule Set + Custom Policies)</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button onClick={() => setCustomRulesOpen(p => !p)} className="text-muted-foreground">
-                {customRulesOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-              </button>
-            </div>
-          </div>
-
-          {customRulesOpen && (
-            <div className="space-y-3">
-              {/* Tab Switcher */}
-              <div className="flex bg-muted/20 p-1 rounded-lg">
-                <button
-                  onClick={() => setLibraryTab("custom")}
-                  className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all flex items-center justify-center gap-2 ${libraryTab === "custom" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  <Zap className="h-3 w-3" /> Custom Policies
-                </button>
-                <button
-                  onClick={() => setLibraryTab("owasp")}
-                  className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all flex items-center justify-center gap-2 ${libraryTab === "owasp" ? "bg-background shadow text-foreground text-blue-500" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  <ShieldCheck className="h-3 w-3" /> OWASP Core Rules
-                </button>
-              </div>
-
-              {/* Action Bar (Custom Only) */}
-              {libraryTab === "custom" && canEdit && !showRuleBuilder && (
-                <div className="flex justify-end gap-2">
-                  <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={handleExport}>
-                    <Download className="h-3.5 w-3.5" /> Export
-                  </Button>
-                  <div className="relative">
-                    <Input
-                      type="file"
-                      className="absolute inset-0 opacity-0 cursor-pointer"
-                      accept=".json"
-                      onChange={handleImport}
-                    />
-                    <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5">
-                      <Upload className="h-3.5 w-3.5" /> Import
+                {canManageSecurityPolicies && (
+                  <div className="flex gap-2 mb-4">
+                    <Input placeholder="e.g. 196.188.1.1" value={newWhiteIp} onChange={e => setNewWhiteIp(e.target.value)}
+                      className="bg-muted/50 text-xs font-mono h-9" onKeyDown={e => e.key === "Enter" && addIPRule("whitelist")} />
+                    <Button size="sm" className="shrink-0 bg-emerald-600 hover:bg-emerald-700 h-9 px-3" onClick={() => addIPRule("whitelist")}>
+                      <Plus className="h-4 w-4" />
                     </Button>
                   </div>
-                  <Button
-                    size="sm"
-                    className="h-8 text-xs gap-1.5 glow-primary"
-                    onClick={() => setShowRuleBuilder(true)}
-                  >
-                    <Plus className="h-3.5 w-3.5" /> New Rule
-                  </Button>
+                )}
+                <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1 custom-scrollbar">
+                  {whitelist.map(ip => (
+                    <div key={ip.id} className="flex items-center justify-between py-2 px-3 rounded-lg text-xs font-mono bg-emerald-500/5 border border-emerald-500/10 hover:bg-emerald-500/10 transition-colors">
+                      <span className="text-emerald-400">{ip.ip_address}</span>
+                      {canManageSecurityPolicies && <button onClick={() => removeIPRule(ip.id)} className="text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="h-3.5 w-3.5" /></button>}
+                    </div>
+                  ))}
+                  {whitelist.length === 0 && <div className="text-xs text-muted-foreground py-8 text-center bg-muted/5 rounded-lg border border-dashed border-border">No allowed IPs configured</div>}
                 </div>
-              )}
-
-              {/* Search & Filter Bar */}
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder={libraryTab === "custom" ? "Search custom rules..." : "Search OWASP rules (Name, ID, Dec)..."}
-                    value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
-                    className="h-9 pl-9 text-xs bg-muted/30"
-                  />
-                </div>
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="h-9 text-xs w-[120px] bg-muted/30"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all" className="text-xs">Any Status</SelectItem>
-                    <SelectItem value="enabled" className="text-xs">Enabled</SelectItem>
-                    <SelectItem value="disabled" className="text-xs">Disabled</SelectItem>
-                    <SelectItem value="BLOCK" className="text-xs">Action: Block</SelectItem>
-                    <SelectItem value="LOG" className="text-xs">Action: Simulate</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Select value={catFilter} onValueChange={setCatFilter}>
-                  <SelectTrigger className="h-9 text-xs w-[140px] bg-muted/30"><SelectValue placeholder="Category" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all" className="text-xs">Any Category</SelectItem>
-                    {Array.from(new Set([
-                      ...safeCustomRules.map(r => r.category),
-                      ...safeOwaspRules.map(r => r.category).filter(Boolean)
-                    ])).sort().map(c => (
-                      <SelectItem key={c} value={c!} className="text-xs">{c}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
               </div>
 
-              {libraryTab === "custom" ? (
-                <>
-                  {(showRuleBuilder || editingRule) && (
-                    <CustomRuleBuilder
-                      initialRule={editingRule || undefined}
-                      onSave={saveCustomRule}
-                      onCancel={() => { setShowRuleBuilder(false); setEditingRule(null); }}
-                      token={token}
-                    />
+              {/* Blocklist */}
+              <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
+                <h3 className="text-sm font-bold mb-3 text-red-400 flex items-center gap-2 uppercase tracking-tight">
+                  <Ban className="h-4 w-4" /> IP Blocklist
+                </h3>
+                <p className="text-[11px] text-muted-foreground mb-4 leading-relaxed">
+                  Explicitly block malicious IPs or ranges. These IPs are dropped immediately at the edge before any further processing.
+                </p>
+                {canManageSecurityPolicies && (
+                  <div className="flex gap-2 mb-4">
+                    <Input placeholder="e.g. 203.0.113.5" value={newBlackIp} onChange={e => setNewBlackIp(e.target.value)}
+                      className="bg-muted/50 text-xs font-mono h-9" onKeyDown={e => e.key === "Enter" && addIPRule("blacklist")} />
+                    <Button size="sm" variant="destructive" className="shrink-0 h-9 px-3" onClick={() => addIPRule("blacklist")}>
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
+                <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1 custom-scrollbar">
+                  {blacklist.map(ip => (
+                    <div key={ip.id} className="flex items-center justify-between py-2 px-3 rounded-lg text-xs font-mono bg-red-500/5 border border-red-500/10 hover:bg-red-500/10 transition-colors">
+                      <span className="text-red-400">{ip.ip_address}</span>
+                      {canManageSecurityPolicies && <button onClick={() => removeIPRule(ip.id)} className="text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="h-3.5 w-3.5" /></button>}
+                    </div>
+                  ))}
+                  {blacklist.length === 0 && <div className="text-xs text-muted-foreground py-8 text-center bg-muted/5 rounded-lg border border-dashed border-border">No blocked IPs configured</div>}
+                </div>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="application" className="space-y-6 mt-0">
+            {/* Rule Library Panel */}
+            <div className="border border-border/80 bg-card rounded-xl p-5 shadow-sm space-y-4 relative">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold flex items-center gap-2">
+                    <ShieldCheck className="h-4 w-4 text-primary" /> Rule Library
+                  </h3>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">Central repository of all WAF rules (OWASP Core Rule Set + Custom Policies)</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setCustomRulesOpen(p => !p)} className="text-muted-foreground">
+                    {customRulesOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {customRulesOpen && (
+                <div className="space-y-3">
+                  {/* Tab Switcher */}
+                  <div className="flex bg-muted/20 p-1 rounded-lg">
+                    <button
+                      onClick={() => setLibraryTab("custom")}
+                      className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all flex items-center justify-center gap-2 ${libraryTab === "custom" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                    >
+                      <Zap className="h-3 w-3" /> Custom Policies
+                    </button>
+                    <button
+                      onClick={() => setLibraryTab("owasp")}
+                      className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all flex items-center justify-center gap-2 ${libraryTab === "owasp" ? "bg-background shadow text-foreground text-blue-500" : "text-muted-foreground hover:text-foreground"}`}
+                    >
+                      <ShieldCheck className="h-3 w-3" /> OWASP Core Rules
+                    </button>
+                  </div>
+
+                  {/* Action Bar (Custom Only) */}
+                  {libraryTab === "custom" && canEdit && !showRuleBuilder && (
+                    <div className="flex justify-end gap-2">
+                      <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={handleExport}>
+                        <Download className="h-3.5 w-3.5" /> Export
+                      </Button>
+                      <div className="relative">
+                        <Input
+                          type="file"
+                          className="absolute inset-0 opacity-0 cursor-pointer"
+                          accept=".json"
+                          onChange={handleImport}
+                        />
+                        <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5">
+                          <Upload className="h-3.5 w-3.5" /> Import
+                        </Button>
+                      </div>
+                      <Button
+                        size="sm"
+                        className="h-8 text-xs gap-1.5 glow-primary"
+                        onClick={() => setShowRuleBuilder(true)}
+                      >
+                        <Plus className="h-3.5 w-3.5" /> New Rule
+                      </Button>
+                    </div>
                   )}
 
-                  {customRules.length === 0 && !showRuleBuilder && !editingRule ? (
-                    <div className="py-8 text-center text-muted-foreground text-sm border border-dashed border-border rounded-lg">
-                      No custom rules yet. Click <strong>New Rule</strong> to build one.
+                  {/* Search & Filter Bar */}
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder={libraryTab === "custom" ? "Search custom rules..." : "Search OWASP rules (Name, ID, Dec)..."}
+                        value={searchQuery}
+                        onChange={e => setSearchQuery(e.target.value)}
+                        className="h-9 pl-9 text-xs bg-muted/30"
+                      />
                     </div>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {filteredRules.length === 0 && (
+                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                      <SelectTrigger className="h-9 text-xs w-[120px] bg-muted/30"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all" className="text-xs">Any Status</SelectItem>
+                        <SelectItem value="enabled" className="text-xs">Enabled</SelectItem>
+                        <SelectItem value="disabled" className="text-xs">Disabled</SelectItem>
+                        <SelectItem value="BLOCK" className="text-xs">Action: Block</SelectItem>
+                        <SelectItem value="LOG" className="text-xs">Action: Simulate</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select value={catFilter} onValueChange={setCatFilter}>
+                      <SelectTrigger className="h-9 text-xs w-[140px] bg-muted/30"><SelectValue placeholder="Category" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all" className="text-xs">Any Category</SelectItem>
+                        {Array.from(new Set([
+                          ...safeCustomRules.map(r => r.category),
+                          ...safeOwaspRules.map(r => r.category).filter(Boolean)
+                        ])).sort().map(c => (
+                          <SelectItem key={c} value={c!} className="text-xs">{c}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {libraryTab === "owasp" && latestOwaspSync && (
+                    <div className="bg-primary border-2 border-primary/20 rounded-xl p-4 flex items-center justify-between mb-4 shadow-lg text-white">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-white/20 p-2 rounded-lg backdrop-blur-sm">
+                          <Clock className="h-5 w-5 text-white" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-black uppercase tracking-tight">Security rules updated</p>
+                          <p className="text-[11px] text-white/80 font-medium">Last Ruleset Sync: {latestOwaspSync.toLocaleString()}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 text-[10px] bg-white text-primary px-3 py-1.5 rounded-full font-black uppercase tracking-widest shadow-sm">
+                        <CheckCircle2 className="h-3.5 w-3.5" /> System Protected
+                      </div>
+                    </div>
+                  )}
+
+                  {libraryTab === "custom" ? (
+                    <>
+                      {(showRuleBuilder || editingRule) && (
+                        <CustomRuleBuilder
+                          initialRule={editingRule || undefined}
+                          onSave={saveCustomRule}
+                          onCancel={() => { setShowRuleBuilder(false); setEditingRule(null); }}
+                          token={token}
+                        />
+                      )}
+
+                      {customRules.length === 0 && !showRuleBuilder && !editingRule ? (
                         <div className="py-8 text-center text-muted-foreground text-sm border border-dashed border-border rounded-lg">
-                          No matching custom rules found.
+                          No custom rules yet. Click <strong>New Rule</strong> to build one.
+                        </div>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {filteredRules.length === 0 && (
+                            <div className="py-8 text-center text-muted-foreground text-sm border border-dashed border-border rounded-lg">
+                              No matching custom rules found.
+                            </div>
+                          )}
+                          {filteredRules.map((rule) => (
+                            <div key={rule.id} className={`flex items-center justify-between py-2.5 px-3 rounded-lg border transition-colors ${rule.enabled ? "bg-muted/20 border-border/60" : "bg-muted/10 border-border/30 opacity-60"}`}>
+                              <div className="flex items-center gap-3 min-w-0">
+                                <span className="text-[9px] font-mono text-muted-foreground/60 w-4">{rule.priority}</span>
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium truncate flex items-center gap-2">
+                                    {rule.name}
+                                    <span className="text-[9px] font-mono font-bold px-1.5 rounded-full border border-primary/20 bg-primary/10 text-primary">
+                                      {rule.category || "Custom"}
+                                    </span>
+                                  </p>
+                                  <p className="text-[10px] text-muted-foreground font-mono mt-0.5">
+                                    {rule.is_raw ? (
+                                      <span className="text-primary/70">{"<RAW MODSECURITY> "}</span>
+                                    ) : (
+                                      <>
+                                        IF {rule.condition_field} {rule.condition_operator} <span className="text-foreground/70">"{rule.condition_value}"</span>
+                                        {rule.logic_operator && <> {rule.logic_operator} {rule.condition2_field} {rule.condition2_operator} <span className="text-foreground/70">"{rule.condition2_value}"</span></>}
+                                      </>
+                                    )}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                {rule.is_raw ? (
+                                  <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded border border-primary/30 bg-primary/10 text-primary">RAW RULE</span>
+                                ) : (
+                                  <div className="flex gap-1.5 items-center">
+                                    <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded border border-muted-foreground/30 bg-muted/10 text-muted-foreground">CUSTOM BUILDER</span>
+                                    {actionBadge(rule.action)}
+                                  </div>
+                                )}
+                                {canEdit && (
+                                  <div className="flex items-center gap-1.5 ml-2 transition-all">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 w-7 p-0 text-blue-400 hover:text-blue-500 hover:bg-blue-500/10"
+                                      title="View version history"
+                                      onClick={() => {
+                                        setSelectedHistoryRule(rule);
+                                        setShowHistory(true);
+                                        fetchHistory(rule.id);
+                                      }}
+                                    >
+                                      <History className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 w-7 p-0"
+                                      onClick={() => setEditingRule(rule)}
+                                    >
+                                      <Pencil className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 w-7 p-0 text-destructive"
+                                      onClick={() => deleteCustomRule(rule.id)}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <div className="w-px h-4 bg-border mx-1"></div>
+                                    <Select value={!rule.enabled ? "DISABLED" : rule.action} onValueChange={(v) => changeCustomRuleState(rule.id, v)}>
+                                      <SelectTrigger className="h-7 text-xs w-[110px] bg-muted/50 border-border"><SelectValue /></SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="BLOCK" className="text-xs text-red-500 font-medium">Block</SelectItem>
+                                        <SelectItem value="LOG" className="text-xs text-amber-500 font-medium">Simulate</SelectItem>
+                                        <SelectItem value="DISABLED" className="text-xs text-muted-foreground">Disabled</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       )}
-                      {filteredRules.map((rule) => (
-                        <div key={rule.id} className={`flex items-center justify-between py-2.5 px-3 rounded-lg border transition-colors ${rule.enabled ? "bg-muted/20 border-border/60" : "bg-muted/10 border-border/30 opacity-60"}`}>
-                          <div className="flex items-center gap-3 min-w-0">
-                            <span className="text-[9px] font-mono text-muted-foreground/60 w-4">{rule.priority}</span>
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium truncate flex items-center gap-2">
-                                {rule.name}
-                                <span className="text-[9px] font-mono font-bold px-1.5 rounded-full border border-primary/20 bg-primary/10 text-primary">
-                                  {rule.category || "Custom"}
-                                </span>
-                              </p>
-                              <p className="text-[10px] text-muted-foreground font-mono mt-0.5">
-                                {rule.is_raw ? (
-                                  <span className="text-primary/70">{"<RAW MODSECURITY> "}</span>
-                                ) : (
-                                  <>
-                                    IF {rule.condition_field} {rule.condition_operator} <span className="text-foreground/70">"{rule.condition_value}"</span>
-                                    {rule.logic_operator && <> {rule.logic_operator} {rule.condition2_field} {rule.condition2_operator} <span className="text-foreground/70">"{rule.condition2_value}"</span></>}
-                                  </>
-                                )}
-                              </p>
-                            </div>
+                    </>
+                  ) : (
+                    <div className="space-y-3">
+                      <OwaspPagination className="mb-2" />
+                      <OwaspSortHeader />
+                      <div className="space-y-1.5">
+                        {paginatedOwaspRules.length === 0 && (
+                          <div className="py-8 text-center text-muted-foreground text-sm border border-dashed border-border rounded-lg">
+                            No matching OWASP rules found.
                           </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            {rule.is_raw ? (
-                              <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded border border-primary/30 bg-primary/10 text-primary">RAW RULE</span>
-                            ) : (
-                              <div className="flex gap-1.5 items-center">
-                                <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded border border-muted-foreground/30 bg-muted/10 text-muted-foreground">CUSTOM BUILDER</span>
-                                {actionBadge(rule.action)}
-                              </div>
-                            )}
-                            {canEdit && (
-                              <div className="flex items-center gap-1.5 ml-2 transition-all">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 w-7 p-0 text-blue-400 hover:text-blue-500 hover:bg-blue-500/10"
-                                  title="View version history"
-                                  onClick={() => {
-                                    setSelectedHistoryRule(rule);
-                                    setShowHistory(true);
-                                    fetchHistory(rule.id);
-                                  }}
-                                >
-                                  <History className="h-3.5 w-3.5" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 w-7 p-0"
-                                  onClick={() => setEditingRule(rule)}
-                                >
-                                  <Pencil className="h-3.5 w-3.5" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 w-7 p-0 text-destructive"
-                                  onClick={() => deleteCustomRule(rule.id)}
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </Button>
-                                <div className="w-px h-4 bg-border mx-1"></div>
-                                <Select value={!rule.enabled ? "DISABLED" : rule.action} onValueChange={(v) => changeCustomRuleState(rule.id, v)}>
-                                  <SelectTrigger className="h-7 text-xs w-[110px] bg-muted/50 border-border"><SelectValue /></SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="BLOCK" className="text-xs text-red-500 font-medium">Block</SelectItem>
-                                    <SelectItem value="LOG" className="text-xs text-amber-500 font-medium">Simulate</SelectItem>
-                                    <SelectItem value="DISABLED" className="text-xs text-muted-foreground">Disabled</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
+                        )}
+                        {paginatedOwaspRules.map((rule) => (
+                          <OWASPRuleRow
+                            key={rule.id}
+                            rule={rule}
+                            isExpanded={!!expandedOwaspRules[rule.rule_id || (rule as any).ruleId || rule.id.split('-')[0]]}
+                            onToggleExpand={toggleExpanded}
+                            ruleExclusions={owaspExclusions.filter(e => (e.rule_id || (e as any).ruleId) === (rule.rule_id || (rule as any).ruleId || rule.id.split('-')[0]))}
+                            canEdit={canEdit}
+                            onToggleRule={toggleOwaspRule}
+                            onAddExclusion={addOwaspExclusion}
+                            onUpdateExclusion={updateOwaspExclusion}
+                            onRemoveExclusion={removeOwaspExclusion}
+                            onCloneRule={(r) => {
+                              const rId = r.rule_id || (r as any).ruleId || r.id.split('-')[0];
+                              setEditingRule({
+                                id: "new",
+                                name: `Clone of Rule ${rId}: ${r.name}`,
+                                description: `Deeply customized version of standard OWASP rule ${rId}.\n\nOriginal description: ${r.description}`,
+                                action: r.action === "DISABLED" ? "BLOCK" : r.action as any,
+                                enabled: true,
+                                priority: 50,
+                                is_raw: true,
+                                condition_field: "uri",
+                                condition_operator: "contains",
+                                condition_value: "/",
+                                condition2_field: "ip",
+                                condition2_operator: "eq",
+                                condition2_value: "",
+                                logic_operator: "",
+                                category: r.category || "Custom",
+                                raw_content: `# Customization for Core Rule ${rId}\n# Original: ${r.name}\n\nSecRule REQUEST_URI "@rx .*" \\\n    "id:100${rId},phase:2,deny,status:403,msg:'${r.name} (Custom Override)'"`
+                              });
+                              setShowRuleBuilder(true);
+                              setLibraryTab("custom");
+                            }}
+                          />
+                        ))}
+                      </div>
+                      <OwaspPagination className="mt-2" />
                     </div>
                   )}
-                </>
-              ) : (
-                <div className="space-y-1.5">
-                  {filteredOwaspRules.length === 0 && (
-                    <div className="py-8 text-center text-muted-foreground text-sm border border-dashed border-border rounded-lg">
-                      No matching OWASP rules found.
-                    </div>
-                  )}
-                  {filteredOwaspRules.map((rule) => (
-                    <OWASPRuleRow
-                      key={rule.id}
-                      rule={rule}
-                      isExpanded={!!expandedOwaspRules[rule.rule_id || (rule as any).ruleId || rule.id.split('-')[0]]}
-                      onToggleExpand={toggleExpanded}
-                      ruleExclusions={owaspExclusions.filter(e => (e.rule_id || (e as any).ruleId) === (rule.rule_id || (rule as any).ruleId || rule.id.split('-')[0]))}
-                      canEdit={canEdit}
-                      onToggleRule={toggleOwaspRule}
-                      onAddExclusion={addOwaspExclusion}
-                      onUpdateExclusion={updateOwaspExclusion}
-                      onRemoveExclusion={removeOwaspExclusion}
-                      onCloneRule={(r) => {
-                        const rId = r.rule_id || (r as any).ruleId || r.id.split('-')[0];
-                        setEditingRule({
-                          id: "new",
-                          name: `Clone of Rule ${rId}: ${r.name}`,
-                          description: `Deeply customized version of standard OWASP rule ${rId}.\n\nOriginal description: ${r.description}`,
-                          action: r.action === "DISABLED" ? "BLOCK" : r.action as any,
-                          enabled: true,
-                          priority: 50,
-                          is_raw: true,
-                          condition_field: "uri",
-                          condition_operator: "contains",
-                          condition_value: "/",
-                          condition2_field: "ip",
-                          condition2_operator: "eq",
-                          condition2_value: "",
-                          logic_operator: "",
-                          category: r.category || "Custom",
-                          raw_content: `# Customization for Core Rule ${rId}\n# Original: ${r.name}\n\nSecRule REQUEST_URI "@rx .*" \\\n    "id:100${rId},phase:2,deny,status:403,msg:'${r.name} (Custom Override)'"`
-                        });
-                        setShowRuleBuilder(true);
-                        setLibraryTab("custom");
-                      }}
-                    />
-                  ))}
                 </div>
               )}
             </div>
-          )}
-        </div>
+
+          </TabsContent>
+
+          <TabsContent value="tooling" className="space-y-6 mt-0">
+            <div className="bg-card border border-border rounded-xl p-6 shadow-sm space-y-6">
+              <div>
+                <h3 className="text-sm font-bold flex items-center gap-2">
+                  <History className="h-4 w-4 text-blue-400" /> Operational History
+                </h3>
+                <p className="text-[11px] text-muted-foreground mt-1">Review recent policy changes and rollback to previous versions.</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                <div className="p-4 rounded-lg border border-border bg-muted/5 space-y-3">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Configuration Backup</h4>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" className="flex-1 h-9 gap-2" onClick={handleExport}>
+                      <Download className="h-3.5 w-3.5" /> Export All
+                    </Button>
+                    <div className="relative flex-1">
+                      <Input type="file" className="absolute inset-0 opacity-0 cursor-pointer" accept=".json" onChange={handleImport} />
+                      <Button size="sm" variant="outline" className="w-full h-9 gap-2">
+                        <Upload className="h-3.5 w-3.5" /> Import Rules
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-lg border border-border bg-muted/5 space-y-3">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Audit Trail</h4>
+                  <Button size="sm" variant="outline" className="w-full h-9 gap-2" onClick={() => {
+                    if (customRules.length > 0) {
+                      setSelectedHistoryRule(customRules[0]);
+                      setShowHistory(true);
+                      fetchHistory(customRules[0].id);
+                    }
+                  }}>
+                    <History className="h-3.5 w-3.5" /> View Version Log
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </TabsContent>
+        </Tabs>
 
         {/* History Modal Overlay */}
         {showHistory && (
-          <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[100] bg-background/80 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="bg-card w-full max-w-lg rounded-xl border shadow-xl p-5 relative">
               <button onClick={() => setShowHistory(false)} className="absolute top-4 right-4 text-muted-foreground hover:text-foreground">
                 <X className="h-4 w-4" />
@@ -1512,8 +1834,10 @@ export default function PoliciesPage() {
               </h3>
 
               <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1 custom-scrollbar">
-                {historyVersions.length === 0 ? (
-                  <p className="text-sm text-muted-foreground italic text-center py-6">No historical versions available for this rule.</p>
+                {historyLoading ? (
+                  <div className="py-12 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+                ) : historyVersions.length === 0 ? (
+                  <p className="text-sm text-muted-foreground italic text-center py-6">No historical versions available.</p>
                 ) : (
                   historyVersions.map((v) => (
                     <div key={v.id} className="flex flex-col gap-2 p-3 bg-muted/10 border border-border/50 rounded-lg">
@@ -1522,19 +1846,19 @@ export default function PoliciesPage() {
                           <p className="text-xs font-mono text-muted-foreground">
                             {new Date(v.version_timestamp).toLocaleString()}
                           </p>
-                          <p className="text-[10px] text-muted-foreground">Edited by: {v.changed_by}</p>
+                          <p className="text-[10px] text-muted-foreground">By: {v.changed_by}</p>
                         </div>
                         <Button
                           size="sm"
                           variant="outline"
-                          className="h-7 text-xs gap-1 border-blue-500/30 text-blue-400 hover:bg-blue-500/10 hover:text-blue-300"
+                          className="h-7 text-xs gap-1"
                           onClick={() => rollbackVersion(v.rule_id, v.id)}
                         >
                           <RotateCcw className="h-3 w-3" /> Restore
                         </Button>
                       </div>
-                      <div className="text-[9px] font-mono whitespace-pre-wrap bg-background p-2 rounded-md overflow-x-auto text-muted-foreground/80 border border-border/30">
-                        {v.snapshot_data.length > 250 ? v.snapshot_data.substring(0, 250) + "..." : v.snapshot_data}
+                      <div className="text-[9px] font-mono whitespace-pre-wrap bg-background p-2 rounded-md border border-border/30 max-h-20 overflow-hidden">
+                        {v.snapshot_data}
                       </div>
                     </div>
                   ))
@@ -1543,151 +1867,6 @@ export default function PoliciesPage() {
             </div>
           </div>
         )}
-
-
-
-        {/* URI Exclusions */}
-        <div className="bg-card border border-border rounded-xl p-5">
-          <h3 className="text-sm font-semibold mb-3">URI Exclusions (WAF Bypass Paths)</h3>
-          {canManageSecurityPolicies && (
-            <div className="flex gap-2 mb-3">
-              <Input placeholder="/api/health" value={newUri} onChange={e => setNewUri(e.target.value)} className="bg-muted/50 text-xs font-mono flex-1" />
-              <Input placeholder="Description (optional)" value={newUriDesc} onChange={e => setNewUriDesc(e.target.value)} className="bg-muted/50 text-xs flex-1" />
-              <Button size="sm" className="shrink-0" onClick={addURI}><Plus className="h-3.5 w-3.5" /></Button>
-            </div>
-          )}
-          <div className="space-y-1.5">
-            {(Array.isArray(uriExclusions) ? uriExclusions : []).map(u => (
-              <div key={u.id} className={`flex items-center justify-between py-1.5 px-2 rounded text-xs font-mono bg-muted/20 ${!u.enabled ? "opacity-50" : ""}`}>
-                <div className="flex items-center gap-2">
-                  <Switch checked={u.enabled} onCheckedChange={() => canManageSecurityPolicies && toggleURI(u.id, u.enabled)} className="scale-75" disabled={!canManageSecurityPolicies} />
-                  <span className={u.enabled ? "" : "line-through"}>{u.uri_pattern}</span>
-                  {u.description && <span className="text-muted-foreground font-sans">— {u.description}</span>}
-                </div>
-                {canManageSecurityPolicies && <button onClick={() => deleteURI(u.id)} className="text-muted-foreground hover:text-destructive"><Trash2 className="h-3 w-3" /></button>}
-              </div>
-            ))}
-            {uriExclusions.length === 0 && <p className="text-xs text-muted-foreground py-2">No URI exclusions configured</p>}
-          </div>
-        </div>
-
-        {/* Geo-Filtering Section */}
-        <div className="bg-card border border-border rounded-xl p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <MapPin className="h-5 w-5 text-primary" />
-              <div>
-                <h3 className="text-sm font-bold">Regional Geo-Filtering</h3>
-                <p className="text-[11px] text-muted-foreground">Enforce regional access policies and block high-risk territories</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2 mr-4 px-3 py-1 bg-muted/30 rounded-full border border-border">
-                <span className="text-[10px] font-bold text-muted-foreground uppercase">Active Mode:</span>
-                <span className={`text-[10px] font-mono font-bold ${geoMode === 'allowlist' ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {geoMode === 'allowlist' ? 'PASS TRUSTED ONLY' : 'BLOCK TARGETED'}
-                </span>
-              </div>
-              <Switch checked={geoEnabled} onCheckedChange={setGeoEnabled} disabled={!canManageSecurityPolicies} />
-            </div>
-          </div>
-
-          {geoEnabled && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Geo Allowlist */}
-                <div className={`space-y-4 p-4 rounded-xl border transition-all ${geoMode === 'allowlist' ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-muted/10 border-border opacity-60'}`}>
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-bold text-emerald-400 flex items-center gap-2 uppercase">
-                      <ShieldCheck className="h-3.5 w-3.5" /> Trusted Regions
-                    </h4>
-                    <button
-                      onClick={() => setGeoMode('allowlist')}
-                      className={`text-[9px] px-2 py-0.5 rounded border transition-all ${geoMode === 'allowlist' ? 'bg-emerald-500 text-white border-emerald-500' : 'border-border text-muted-foreground hover:border-emerald-500/50'}`}
-                    >
-                      {geoMode === 'allowlist' ? 'ACTIVE' : 'ACTIVATE'}
-                    </button>
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap gap-1.5 p-2 rounded bg-background/50 border border-border min-h-[60px]">
-                      {geoAllowlist.map(c => (
-                        <span key={c} className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[9px] font-mono font-bold">
-                          {c}
-                          <button onClick={() => setGeoAllowlist(p => p.filter(x => x !== c))} className="hover:text-white"><X className="h-2 w-2" /></button>
-                        </span>
-                      ))}
-                    </div>
-                    <div className="flex gap-2">
-                      <Select onValueChange={(c) => c && !geoAllowlist.includes(c) && setGeoAllowlist(p => [...p, c])}>
-                        <SelectTrigger className="h-8 text-[10px] bg-background/50"><SelectValue placeholder="Add to allowlist..." /></SelectTrigger>
-                        <SelectContent className="max-h-48 overflow-y-auto">
-                          {COUNTRIES.map(c => <SelectItem key={c} value={c} className="text-[10px]">{c}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Geo Blocklist */}
-                <div className={`space-y-4 p-4 rounded-xl border transition-all ${geoMode === 'blocklist' ? 'bg-red-500/5 border-red-500/20' : 'bg-muted/10 border-border opacity-60'}`}>
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-bold text-red-400 flex items-center gap-2 uppercase">
-                      <Ban className="h-3.5 w-3.5" /> Restricted Regions
-                    </h4>
-                    <button
-                      onClick={() => setGeoMode('blocklist')}
-                      className={`text-[9px] px-2 py-0.5 rounded border transition-all ${geoMode === 'blocklist' ? 'bg-red-500 text-white border-red-500' : 'border-border text-muted-foreground hover:border-red-500/50'}`}
-                    >
-                      {geoMode === 'blocklist' ? 'ACTIVE' : 'ACTIVATE'}
-                    </button>
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap gap-1.5 p-2 rounded bg-background/50 border border-border min-h-[60px]">
-                      {geoBlocklist.map(c => (
-                        <span key={c} className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/20 text-red-400 text-[9px] font-mono font-bold">
-                          {c}
-                          <button onClick={() => setGeoBlocklist(p => p.filter(x => x !== c))} className="hover:text-white"><X className="h-2 w-2" /></button>
-                        </span>
-                      ))}
-                    </div>
-                    <div className="flex gap-2">
-                      <Select onValueChange={(c) => c && !geoBlocklist.includes(c) && setGeoBlocklist(p => [...p, c])}>
-                        <SelectTrigger className="h-8 text-[10px] bg-background/50"><SelectValue placeholder="Add to blocklist..." /></SelectTrigger>
-                        <SelectContent className="max-h-48 overflow-y-auto">
-                          {COUNTRIES.map(c => <SelectItem key={c} value={c} className="text-[10px]">{c}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex justify-end pt-4 border-t border-border">
-                <Button size="sm" className="font-mono text-xs h-8 glow-primary" onClick={saveSettings} disabled={rateSaving}>
-                  {rateSaving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Save className="h-3 w-3 mr-1" />}
-                  Apply Regional Policies
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Rate Limiting */}
-        <div className="bg-card border border-border rounded-xl p-5">
-          <h3 className="text-sm font-semibold mb-3">Rate Limiting</h3>
-          <div className="flex items-center gap-4">
-            <Label className="text-xs text-muted-foreground shrink-0">Max requests / minute / IP</Label>
-            <Input type="number" value={rateLimit} onChange={e => setRateLimit(e.target.value)} className="bg-muted/50 font-mono w-28" disabled={!canManageSecurityPolicies} />
-            {canManageSecurityPolicies && (
-              <Button size="sm" className="font-mono text-xs glow-primary" disabled={rateSaving} onClick={saveSettings}>
-                {rateSaving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Zap className="h-3 w-3 mr-1" />}
-                Apply Rate Limit
-              </Button>
-            )}
-          </div>
-        </div>
       </div>
 
       {isLocked && (

@@ -12,6 +12,15 @@ namespace AffiniSecurity.Waf.DTOs
         public string Password { get; set; } = string.Empty;
     }
 
+    public class ResetPasswordRequest
+    {
+        [JsonPropertyName("email")]
+        public string Email { get; set; } = string.Empty;
+        
+        [JsonPropertyName("password")]
+        public string Password { get; set; } = string.Empty;
+    }
+
     public class SignupRequest
     {
         [JsonPropertyName("email")]
@@ -26,8 +35,62 @@ namespace AffiniSecurity.Waf.DTOs
         [JsonPropertyName("companyName")]
         public string CompanyName { get; set; } = string.Empty;
 
+        [JsonPropertyName("legalName")]
+        public string? LegalName { get; set; }
+
         [JsonPropertyName("phone")]
         public string Phone { get; set; } = string.Empty;
+
+        [JsonPropertyName("tinNo")]
+        public string? TinNo { get; set; }
+
+        [JsonPropertyName("licenseNo")]
+        public string? LicenseNo { get; set; }
+
+        [JsonPropertyName("industry")]
+        public string? Industry { get; set; }
+
+        [JsonPropertyName("category")]
+        public string? Category { get; set; }
+
+        [JsonPropertyName("address")]
+        public string? Address { get; set; }
+    }
+
+    public class UserDTO
+    {
+        [JsonPropertyName("id")] public string Id { get; set; } = string.Empty;
+        [JsonPropertyName("email")] public string Email { get; set; } = string.Empty;
+        [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
+        [JsonPropertyName("role")] public string Role { get; set; } = string.Empty;
+        [JsonPropertyName("tenantId")] public string TenantId { get; set; } = string.Empty;
+    }
+
+    public class TenantDTO
+    {
+        [JsonPropertyName("id")] public string Id { get; set; } = string.Empty;
+        [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
+        [JsonPropertyName("legalName")] public string? LegalName { get; set; }
+        [JsonPropertyName("tinNo")] public string? TinNo { get; set; }
+        [JsonPropertyName("licenseNo")] public string? LicenseNo { get; set; }
+        [JsonPropertyName("category")] public string? Category { get; set; }
+        [JsonPropertyName("industry")] public string? Industry { get; set; }
+        [JsonPropertyName("logoUrl")] public string? LogoUrl { get; set; }
+        [JsonPropertyName("primaryColor")] public string? PrimaryColor { get; set; }
+        [JsonPropertyName("brandName")] public string? BrandName { get; set; }
+        [JsonPropertyName("manager")] public string? Manager { get; set; }
+        [JsonPropertyName("address")] public string? Address { get; set; }
+        [JsonPropertyName("contactEmail")] public string? ContactEmail { get; set; }
+        [JsonPropertyName("contactPhone")] public string? ContactPhone { get; set; }
+        [JsonPropertyName("isProfileComplete")] public bool IsProfileComplete { get; set; }
+        [JsonPropertyName("onboardingStep")] public int OnboardingStep { get; set; }
+    }
+
+    public class SubscriptionDTO
+    {
+        [JsonPropertyName("id")] public string Id { get; set; } = string.Empty;
+        [JsonPropertyName("planName")] public string PlanName { get; set; } = string.Empty;
+        [JsonPropertyName("status")] public string Status { get; set; } = string.Empty;
     }
 
     public class AuthResponse
@@ -36,16 +99,15 @@ namespace AffiniSecurity.Waf.DTOs
         public string Token { get; set; } = string.Empty;
         
         [JsonPropertyName("user")]
-        public User User { get; set; } = null!;
+        public UserDTO User { get; set; } = null!;
         
         [JsonPropertyName("tenant")]
-        public Tenant Tenant { get; set; } = null!;
+        public TenantDTO Tenant { get; set; } = null!;
         
         [JsonPropertyName("plan")]
-        public Subscription Plan { get; set; } = null!;
-
+        public SubscriptionDTO Plan { get; set; } = null!;
+        
         [JsonPropertyName("planConfig")]
         public PlanConfig? PlanConfig { get; set; }
-
     }
 }

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using AffiniSecurity.Waf.Data;
 using AffiniSecurity.Waf.Models;
+using AffiniSecurity.Waf.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace AffiniSecurity.Waf.Controllers
@@ -18,8 +19,29 @@ namespace AffiniSecurity.Waf.Controllers
             _context = context;
         }
 
+        private async Task SyncToRedis(SecuritySettings settings, IRedisService redisService)
+        {
+            var isEnabledStr = settings.MlDetectionEnabled.ToString().ToLower();
+            // 1. Sync by TenantId
+            await redisService.SetValueAsync($"tenant:ai:{settings.TenantId}:enabled", isEnabledStr);
+
+            // 2. Sync by DomainNames associated with this TenantId
+            var domains = await _context.Domains
+                .IgnoreQueryFilters()
+                .Where(d => d.TenantId == settings.TenantId)
+                .ToListAsync();
+
+            foreach (var domain in domains)
+            {
+                if (!string.IsNullOrEmpty(domain.DomainName))
+                {
+                    await redisService.SetValueAsync($"tenant:ai:{domain.DomainName}:enabled", isEnabledStr);
+                }
+            }
+        }
+
         [HttpGet]
-        public async Task<IActionResult> GetSettings()
+        public async Task<IActionResult> GetSettings([FromServices] IRedisService redisService)
         {
             var settings = await _context.SecuritySettings.FirstOrDefaultAsync();
             if (settings == null)
@@ -28,11 +50,15 @@ namespace AffiniSecurity.Waf.Controllers
                 _context.SecuritySettings.Add(settings);
                 await _context.SaveChangesAsync();
             }
+            await SyncToRedis(settings, redisService);
             return Ok(settings);
         }
 
         [HttpPut]
-        public async Task<IActionResult> UpdateSettings([FromBody] SecuritySettings settings, [FromServices] AffiniSecurity.Waf.Services.WafConfigGenerator wafGenerator)
+        public async Task<IActionResult> UpdateSettings(
+            [FromBody] SecuritySettings settings, 
+            [FromServices] AffiniSecurity.Waf.Services.WafConfigGenerator wafGenerator,
+            [FromServices] IRedisService redisService)
         {
             Console.WriteLine($"[UpdateSettings] Received PUT request. Incoming JsChallengeEnabled={settings.JsChallengeEnabled}, BotProtectionEnabled={settings.BotProtectionEnabled}, GeoEnabled={settings.GeoEnabled}");
             var existing = await _context.SecuritySettings.FirstOrDefaultAsync();
@@ -41,6 +67,8 @@ namespace AffiniSecurity.Waf.Controllers
                 _context.SecuritySettings.Add(settings);
                 await _context.SaveChangesAsync();
                 
+                await SyncToRedis(settings, redisService);
+
                 // Trigger global WAF orchestration reload
                 await wafGenerator.GenerateAndReloadAsync();
                 return Ok(settings);
@@ -64,6 +92,8 @@ namespace AffiniSecurity.Waf.Controllers
 
             await _context.SaveChangesAsync();
             
+            await SyncToRedis(existing, redisService);
+
             // Trigger global WAF orchestration reload to apply active bot protection policies
             await wafGenerator.GenerateAndReloadAsync();
             

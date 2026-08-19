@@ -52,6 +52,12 @@ namespace AffiniSecurity.Waf.Models
         public string Severity { get; set; }
         public string Action { get; set; }
         public string? RawData { get; set; }
+        
+        [JsonPropertyName("mitre_technique")]
+        public string? MitreTechnique { get; set; }
+        
+        [JsonPropertyName("mitre_tactic")]
+        public string? MitreTactic { get; set; }
     }
 
     [Table("ip_rules")]
@@ -110,6 +116,12 @@ namespace AffiniSecurity.Waf.Models
 
         [JsonPropertyName("imported_at")]
         public DateTime ImportedAt { get; set; } = DateTime.UtcNow;
+
+        [JsonPropertyName("mitre_technique")]
+        public string? MitreTechnique { get; set; }
+
+        [JsonPropertyName("mitre_tactic")]
+        public string? MitreTactic { get; set; }
     }
 
     [Table("owasp_rule_exclusions")]
@@ -195,6 +207,12 @@ namespace AffiniSecurity.Waf.Models
 
         [JsonPropertyName("created_at")]
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        [JsonPropertyName("mitre_technique")]
+        public string? MitreTechnique { get; set; }
+
+        [JsonPropertyName("mitre_tactic")]
+        public string? MitreTactic { get; set; }
     }
 
     [Table("uri_exclusions")]
@@ -267,5 +285,68 @@ namespace AffiniSecurity.Waf.Models
 
         [JsonPropertyName("changed_by")]
         public string? ChangedBy { get; set; }
+    }
+
+    /// <summary>
+    /// Represents a single Indicator of Compromise (IOC) ingested from a global threat feed (e.g., AlienVault OTX).
+    /// </summary>
+    [Table("ioc_indicators")]
+    public class IocIndicator
+    {
+        [Key]
+        [JsonPropertyName("id")]
+        public string Id { get; set; } = Guid.NewGuid().ToString();
+
+        /// <summary>The raw indicator value — e.g., "192.168.1.1", "malware.example.com", "d41d8cd98f00b204e9800998ecf8427e"</summary>
+        [JsonPropertyName("indicator_value")]
+        public string IndicatorValue { get; set; }
+
+        /// <summary>Type of indicator: IPv4, IPv6, domain, URL, FileHash-MD5, FileHash-SHA1, FileHash-SHA256</summary>
+        [JsonPropertyName("indicator_type")]
+        public string IndicatorType { get; set; }
+
+        /// <summary>The OTX pulse name this indicator belongs to.</summary>
+        [JsonPropertyName("pulse_name")]
+        public string? PulseName { get; set; }
+
+        /// <summary>Primary threat category: Malware, Ransomware, C2, Phishing, Scanner, etc.</summary>
+        [JsonPropertyName("threat_type")]
+        public string? ThreatType { get; set; }
+
+        /// <summary>Calculated severity: CRITICAL, HIGH, MEDIUM, LOW</summary>
+        [JsonPropertyName("severity")]
+        public string Severity { get; set; } = "MEDIUM";
+
+        /// <summary>Source feed provider identifier.</summary>
+        [JsonPropertyName("source")]
+        public string Source { get; set; } = "AlienVault-OTX";
+
+        /// <summary>Country code associated with the indicator (if available).</summary>
+        [JsonPropertyName("country")]
+        public string? Country { get; set; }
+
+        /// <summary>External ID from the source provider (e.g., OTX Pulse ID, CVE ID).</summary>
+        [JsonPropertyName("external_id")]
+        public string? ExternalId { get; set; }
+
+        /// <summary>Direct link to the threat information portal (e.g., OTX pulse page).</summary>
+        [JsonPropertyName("external_link")]
+        public string? ExternalLink { get; set; }
+
+        /// <summary>Number of OTX subscribers who also track this indicator — higher = more credible.</summary>
+        [JsonPropertyName("confidence_score")]
+        public int ConfidenceScore { get; set; } = 50;
+
+        [JsonPropertyName("first_seen")]
+        public DateTime FirstSeen { get; set; } = DateTime.UtcNow;
+
+        [JsonPropertyName("last_seen")]
+        public DateTime LastSeen { get; set; } = DateTime.UtcNow;
+
+        [JsonPropertyName("ingested_at")]
+        public DateTime IngestedAt { get; set; } = DateTime.UtcNow;
+        
+        [JsonPropertyName("is_active")]
+        public bool IsActive { get; set; } = true;
     }
 }

@@ -34,7 +34,7 @@ namespace AffiniSecurity.Waf.Controllers
             return Ok(tenant);
         }
 
-        [HttpPost("update")]
+        [HttpPut]
         public async Task<IActionResult> UpdateCompany([FromBody] Tenant profile)
         {
             var tenantId = _tenantService.TenantId;
@@ -43,6 +43,7 @@ namespace AffiniSecurity.Waf.Controllers
             var tenant = await _context.Tenants.FindAsync(tenantId);
             if (tenant == null) return NotFound();
 
+            if (profile.Name != null) tenant.Name = profile.Name;
             if (profile.LegalName != null) tenant.LegalName = profile.LegalName;
             if (profile.Manager != null) tenant.Manager = profile.Manager;
             if (profile.LicenseNo != null) tenant.LicenseNo = profile.LicenseNo;
@@ -53,6 +54,7 @@ namespace AffiniSecurity.Waf.Controllers
             if (profile.ContactEmail != null) tenant.ContactEmail = profile.ContactEmail;
             if (profile.ContactPhone != null) tenant.ContactPhone = profile.ContactPhone;
             if (profile.Website != null) tenant.Website = profile.Website;
+            if (profile.OnboardingStep != 0) tenant.OnboardingStep = profile.OnboardingStep;
             
             tenant.IsProfileComplete = true;
 

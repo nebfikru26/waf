@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Users, UserPlus, Trash2, Mail, ShieldAlert, Loader2,
@@ -28,6 +28,23 @@ interface UserData {
   isActive: boolean;
 }
 
+interface ClientTenantData {
+  id: string;
+  tenantId: string;
+  name: string;
+  legalName: string;
+  email: string;
+  phone: string;
+  jobTitle: string;
+  role: string;
+  industry: string;
+  address: string;
+  website: string;
+  plan: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
 type TabType = "system" | "clients";
 
 const SYSTEM_FORM = { email: "", name: "", password: "", phone: "", jobTitle: "", role: "security_analyst" };
@@ -39,12 +56,12 @@ const PLATFORM_ROLES = ["super_admin", "support_engineer", "admin"];
 const TENANT_ROLES = ["tenant_admin", "security_engineer", "security_analyst", "billing_admin"];
 
 const ROLE_META: Record<string, { label: string; color: string; platform: boolean }> = {
-  super_admin:       { label: "Super Admin",         color: "bg-rose-500/15 text-rose-400 border border-rose-500/20",    platform: true },
-  support_engineer:  { label: "Support Engineer",     color: "bg-orange-500/15 text-orange-400 border border-orange-500/20", platform: true },
-  tenant_admin:      { label: "Tenant Admin",         color: "bg-primary/15 text-primary border border-primary/20",      platform: false },
-  security_engineer: { label: "Security Engineer",   color: "bg-violet-500/15 text-violet-400 border border-violet-500/20", platform: false },
-  security_analyst:  { label: "Security Analyst",    color: "bg-sky-500/15 text-sky-400 border border-sky-500/20",      platform: false },
-  billing_admin:     { label: "Billing Admin",        color: "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20", platform: false },
+  super_admin: { label: "Super Admin", color: "bg-rose-500/15 text-rose-400 border border-rose-500/20", platform: true },
+  support_engineer: { label: "Support Engineer", color: "bg-orange-500/15 text-orange-400 border border-orange-500/20", platform: true },
+  tenant_admin: { label: "Tenant Admin", color: "bg-primary/15 text-primary border border-primary/20", platform: false },
+  security_engineer: { label: "Security Engineer", color: "bg-violet-500/15 text-violet-400 border border-violet-500/20", platform: false },
+  security_analyst: { label: "Security Analyst", color: "bg-sky-500/15 text-sky-400 border border-sky-500/20", platform: false },
+  billing_admin: { label: "Billing Admin", color: "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20", platform: false },
 };
 
 const CLIENT_FORM = {
@@ -125,21 +142,114 @@ export default function UsersPage() {
     enabled: isAdmin,
   });
 
+  const { data: clientTenants = [], isLoading: isLoadingClients } = useQuery<ClientTenantData[]>({
+    queryKey: ["clients"],
+    queryFn: () => fetch("/api/clients", { headers }).then((r) => r.json()),
+    enabled: isPlatformAdmin,
+  });
+
+
   // MOVED CONDITIONAL RETURNS TO THE BOTTOM AFTER ALL HOOKS
 
   const safeUsers = Array.isArray(allUsers) ? allUsers : [];
-  const systemUsers = safeUsers.filter((u) => 
+  const systemUsers = safeUsers.filter((u) =>
     PLATFORM_ROLES.some(r => r.toLowerCase() === u.role?.toLowerCase().trim())
   );
-  const clientUsers = safeUsers.filter((u) => 
-    !PLATFORM_ROLES.some(r => r.toLowerCase() === u.role?.toLowerCase().trim())
-  );
-  
-  const displayUsers = (activeTab === "system" ? systemUsers : clientUsers).filter(u => 
-    (u.name?.toLowerCase() || "").includes(searchTerm.toLowerCase()) || 
-    (u.email?.toLowerCase() || "").includes(searchTerm.toLowerCase()) ||
-    (u.id?.toLowerCase() || "").includes(searchTerm.toLowerCase())
-  );
+
+  const safeClients = Array.isArray(clientTenants) ? clientTenants : [];
+  // For stats badge — clientUsers now from tenant list
+  const clientUsers = safeClients;
+
+  const displayUsers: (UserData | ClientTenantData)[] = activeTab === "system"
+    ? systemUsers.filter(u =>
+      (u.name?.toLowerCase() || "").includes(searchTerm.toLowerCase()) ||
+      (u.email?.toLowerCase() || "").includes(searchTerm.toLowerCase()) ||
+      (u.id?.toLowerCase() || "").includes(searchTerm.toLowerCase())
+    )
+    : safeClients.filter(u =>
+      (u.name?.toLowerCase() || "").includes(searchTerm.toLowerCase()) ||
+      (u.email?.toLowerCase() || "").includes(searchTerm.toLowerCase()) ||
+      ((u as ClientTenantData).tenantId?.toLowerCase() || "").includes(searchTerm.toLowerCase()) ||
+      ((u as ClientTenantData).industry?.toLowerCase() || "").includes(searchTerm.toLowerCase())
+    );
+
+
+  // ── Pagination ─────────────────────────────────────────────────────────────
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize] = useState(10);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, searchTerm]);
+
+  const totalPages = Math.ceil(displayUsers.length / pageSize);
+  const paginatedUsers = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return displayUsers.slice(start, start + pageSize);
+  }, [displayUsers, currentPage, pageSize]);
+
+  const renderPagination = (position: "top" | "bottom") => {
+    if (totalPages <= 1) return null;
+    return (
+      <div className={`px-6 py-3 flex items-center justify-between border-border/50 ${position === "top" ? "border-b bg-muted/50" : "border-t bg-muted/50"}`}>
+        <span className="text-[11px] text-muted-foreground">
+          Showing <span className="font-semibold text-foreground">{Math.min((currentPage - 1) * pageSize + 1, displayUsers.length)}</span> to{" "}
+          <span className="font-semibold text-foreground">{Math.min(currentPage * pageSize, displayUsers.length)}</span> of{" "}
+          <span className="font-semibold text-foreground">{displayUsers.length}</span> {activeTab === "system" ? "staff" : "clients"}
+        </span>
+        <div className="flex items-center gap-1.5">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+            disabled={currentPage === 1}
+            className="h-7 px-2.5 text-[10px]"
+          >
+            Previous
+          </Button>
+          <div className="flex items-center gap-1">
+            {Array.from({ length: totalPages }).map((_, idx) => {
+              const p = idx + 1;
+              if (
+                totalPages <= 4 ||
+                p === 1 ||
+                p === totalPages ||
+                Math.abs(p - currentPage) <= 1
+              ) {
+                return (
+                  <button
+                    key={p}
+                    onClick={() => setCurrentPage(p)}
+                    className={`h-7 w-7 text-[10px] rounded-lg font-bold border transition-all ${currentPage === p
+                      ? activeTab === "system"
+                        ? "bg-primary/10 border-primary/30 text-primary"
+                        : "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                      : "border-border/40 hover:bg-muted text-muted-foreground hover:text-foreground"
+                      }`}
+                  >
+                    {p}
+                  </button>
+                );
+              } else if (p === 2 || p === totalPages - 1) {
+                return <span key={p} className="px-0.5 text-muted-foreground text-xs">...</span>;
+              }
+              return null;
+            })}
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+            disabled={currentPage === totalPages}
+            className="h-7 px-2.5 text-[10px]"
+          >
+            Next
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
 
   // Add system staff (platform admins only)
   const addStaffMutation = useMutation({
@@ -147,7 +257,7 @@ export default function UsersPage() {
       const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const res = await fetch("/api/users", {
         method: "POST",
-        headers: { 
+        headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
         },
@@ -171,7 +281,7 @@ export default function UsersPage() {
       const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const res = await fetch("/api/users", {
         method: "POST",
-        headers: { 
+        headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
         },
@@ -195,7 +305,7 @@ export default function UsersPage() {
       const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const res = await fetch("/api/clients", {
         method: "POST",
-        headers: { 
+        headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
         },
@@ -217,9 +327,9 @@ export default function UsersPage() {
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
       const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
-      const res = await fetch(`/api/users/${id}`, { 
-        method: "DELETE", 
-        headers: { "Authorization": `Bearer ${token}` } 
+      const res = await fetch(`/api/users/${id}`, {
+        method: "DELETE",
+        headers: { "Authorization": `Bearer ${token}` }
       });
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
@@ -236,7 +346,7 @@ export default function UsersPage() {
       const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const res = await fetch(`/api/users/${id}`, {
         method: "PATCH",
-        headers: { 
+        headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
         },
@@ -248,8 +358,8 @@ export default function UsersPage() {
       }
       return res.json();
     },
-    onSuccess: () => { 
-      queryClient.invalidateQueries({ queryKey: ["users"] }); 
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users"] });
       toast({ title: "User updated successfully" });
       setEditTarget(null);
     },
@@ -263,7 +373,7 @@ export default function UsersPage() {
       const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const res = await fetch(`/api/users/${id}/reset-password`, {
         method: "POST",
-        headers: { 
+        headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
         },
@@ -342,7 +452,7 @@ export default function UsersPage() {
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3 flex-1 min-w-[300px] max-w-md">
             <div className="relative w-full">
-              <Input 
+              <Input
                 placeholder={`Search ${activeTab === "system" ? "staff" : "clients"}...`}
                 className="h-9 text-xs font-mono pl-9 bg-muted/20"
                 value={searchTerm}
@@ -356,11 +466,10 @@ export default function UsersPage() {
                 : (["clients"] as TabType[])
               ).map((tab) => (
                 <button key={tab} onClick={() => { setActiveTab(tab); setIsAddOpen(false); }}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-md text-xs font-mono font-medium transition-all ${
-                    activeTab === tab
-                      ? tab === "system" ? "bg-card text-primary border border-border shadow-sm" : "bg-card text-emerald-400 border border-border shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}>
+                  className={`flex items-center gap-2 px-4 py-2 rounded-md text-xs font-mono font-medium transition-all ${activeTab === tab
+                    ? tab === "system" ? "bg-card text-primary border border-border shadow-sm" : "bg-card text-emerald-400 border border-border shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                    }`}>
                   {tab === "system" ? <ShieldCheck className="h-3.5 w-3.5" /> : <Building2 className="h-3.5 w-3.5" />}
                   <span className="hidden sm:inline">{tab === "system" ? "SYSTEM STAFF" : isTenantAdmin ? "TEAM MEMBERS" : "CLIENT ACCOUNTS"}</span>
                   <span className={`ml-1 px-1.5 py-0.5 text-[10px] font-bold rounded ${tab === "system" ? "bg-primary/10 text-primary" : "bg-emerald-500/10 text-emerald-400"}`}>
@@ -596,8 +705,8 @@ export default function UsersPage() {
         </Dialog>
 
         {/* Edit User Dialog */}
-        <Dialog open={!!editTarget} onOpenChange={(open) => { 
-          if (!open) setEditTarget(null); 
+        <Dialog open={!!editTarget} onOpenChange={(open) => {
+          if (!open) setEditTarget(null);
           else if (editTarget) setEditForm({ name: editTarget.name, phone: editTarget.phone || "", jobTitle: editTarget.jobTitle || "", role: editTarget.role });
         }}>
           <DialogContent className="sm:max-w-[440px]">
@@ -605,164 +714,196 @@ export default function UsersPage() {
               <DialogTitle className="flex items-center gap-2"><UserCog className="h-5 w-5 text-primary" /> Modify Profile</DialogTitle>
               <DialogDescription>Update the account properties for {editTarget?.email}.</DialogDescription>
             </DialogHeader>
-            <form onSubmit={(e) => { 
-              e.preventDefault(); 
+            <form onSubmit={(e) => {
+              e.preventDefault();
               if (editTarget) updateUserMutation.mutate({ id: editTarget.id, ...editForm });
             }} className="space-y-4 pt-4">
-               <Field label="Full Name"><Input value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} required /></Field>
-               <div className="grid grid-cols-2 gap-4">
-                  <Field label="Job Title"><Input value={editForm.jobTitle} onChange={e => setEditForm({ ...editForm, jobTitle: e.target.value })} /></Field>
-                  <Field label="Phone"><Input value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} /></Field>
-               </div>
-               <Field label="Role">
-                  <Select value={editForm.role} onValueChange={(v) => setEditForm({ ...editForm, role: v })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {activeTab === "system" ? (
-                        <>
-                          <SelectItem value="super_admin">Super Admin</SelectItem>
-                          <SelectItem value="support_engineer">Support Engineer</SelectItem>
-                        </>
-                      ) : (
-                        <>
-                          <SelectItem value="tenant_admin">Tenant Admin</SelectItem>
-                          <SelectItem value="security_engineer">Security Engineer</SelectItem>
-                          <SelectItem value="security_analyst">Security Analyst</SelectItem>
-                          <SelectItem value="billing_admin">Billing Admin</SelectItem>
-                        </>
-                      )}
-                    </SelectContent>
-                  </Select>
-               </Field>
-               <Button type="submit" className="w-full glow-primary" disabled={updateUserMutation.isPending}>
-                 {updateUserMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />} SAVE CHANGES
-               </Button>
+              <Field label="Full Name"><Input value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} required /></Field>
+              <div className="grid grid-cols-2 gap-4">
+                <Field label="Job Title"><Input value={editForm.jobTitle} onChange={e => setEditForm({ ...editForm, jobTitle: e.target.value })} /></Field>
+                <Field label="Phone"><Input value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} /></Field>
+              </div>
+              <Field label="Role">
+                <Select value={editForm.role} onValueChange={(v) => setEditForm({ ...editForm, role: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {activeTab === "system" ? (
+                      <>
+                        <SelectItem value="super_admin">Super Admin</SelectItem>
+                        <SelectItem value="support_engineer">Support Engineer</SelectItem>
+                      </>
+                    ) : (
+                      <>
+                        <SelectItem value="tenant_admin">Tenant Admin</SelectItem>
+                        <SelectItem value="security_engineer">Security Engineer</SelectItem>
+                        <SelectItem value="security_analyst">Security Analyst</SelectItem>
+                        <SelectItem value="billing_admin">Billing Admin</SelectItem>
+                      </>
+                    )}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Button type="submit" className="w-full glow-primary" disabled={updateUserMutation.isPending}>
+                {updateUserMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />} SAVE CHANGES
+              </Button>
             </form>
           </DialogContent>
         </Dialog>
 
         {/* User Table */}
         <div className="bg-card border border-border rounded-lg overflow-hidden">
-          <div className={`px-6 py-3 border-b border-border flex items-center gap-2 text-xs font-mono font-bold ${
-            activeTab === "system" ? "text-primary bg-primary/5" : "text-emerald-400 bg-emerald-500/5"
-          }`}>
+          <div className={`px-6 py-3 border-b border-border flex items-center gap-2 text-xs font-mono font-bold ${activeTab === "system" ? "text-primary bg-primary/5" : "text-emerald-400 bg-emerald-500/5"
+            }`}>
             {activeTab === "system" ? <><ShieldCheck className="h-3.5 w-3.5" /> SYSTEM STAFF — Internal WAF Portal Access</>
               : <><Building2 className="h-3.5 w-3.5" /> CLIENT ACCOUNTS — Registered Organizations</>}
           </div>
-          {isLoadingUsers ? (
+          {(isLoadingUsers || (activeTab === "clients" && isLoadingClients)) ? (
             <div className="flex items-center justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left bg-muted/20">
-                    <th className="px-6 py-4 text-xs text-muted-foreground font-medium">User</th>
-                    <th className="px-6 py-4 text-xs text-muted-foreground font-medium">Contact</th>
-                    <th className="px-6 py-4 text-xs text-muted-foreground font-medium text-center">Status</th>
-                    <th className="px-6 py-4 text-xs text-muted-foreground font-medium">Role</th>
-                    <th className="px-6 py-4 text-xs text-muted-foreground font-medium">Joined</th>
-                    <th className="px-6 py-4 text-xs text-muted-foreground font-medium text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayUsers.map((u) => {
-                    return (
-                    <tr key={u.id} className="border-b border-border/50 hover:bg-muted/10 transition-colors">
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className={`h-9 w-9 rounded-full flex items-center justify-center shrink-0 ${
-                            activeTab === "system" ? "bg-primary/10 border border-primary/20" : "bg-emerald-500/10 border border-emerald-500/20"
-                          }`}>
-                            <span className={`font-mono font-bold text-sm ${activeTab === "system" ? "text-primary" : "text-emerald-400"}`}>
-                              {(u.name || "?").substring(0, 2).toUpperCase()}
-                            </span>
-                          </div>
-                          <div>
-                            <p className="font-medium text-sm">{u.name || "—"}</p>
-                            {u.jobTitle && <p className="text-[11px] text-muted-foreground">{u.jobTitle}</p>}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <p className="text-xs text-muted-foreground font-mono flex items-center gap-1"><Mail className="h-3 w-3 shrink-0" />{u.email}</p>
-                        {u.phone && <p className="text-[11px] text-muted-foreground mt-0.5">{u.phone}</p>}
-                      </td>
-                      <td className="px-6 py-4 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${u.isActive ? "bg-success/20 text-success border border-success/30" : "bg-destructive/20 text-destructive border border-destructive/30"}`}>
-                          {u.isActive ? "Active" : "Suspended"}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className={`px-2 py-1 rounded font-mono text-[10px] uppercase font-bold ${getRoleColor(u.role)}`}>{getRoleLabel(u.role)}</span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className="text-xs text-muted-foreground font-mono">
-                          {u.createdAt ? new Date(u.createdAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center justify-end gap-2">
-                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => setViewTarget(u)} title="View Account Details">
-                             <Eye className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => { setEditTarget(u); setEditForm({ name: u.name, phone: u.phone || "", jobTitle: u.jobTitle || "", role: u.role }); }} title="Edit Account">
-                             <UserCog className="h-4 w-4" />
-                          </Button>
-                          
-                          {activeTab === "clients" && isPlatformAdmin && (
-                            <Button variant="ghost" size="sm"
-                              className="h-8 text-[10px] font-mono text-primary hover:text-primary hover:bg-primary/10"
-                              onClick={async () => {
-                                 const result = await impersonateTenant(u.tenantId || "");
-                                 if (result.error) {
-                                   toast({ title: "Impersonation Failed", description: result.error, variant: "destructive" });
-                                 } else {
-                                   toast({ title: "Masquerade Active", description: "You are now interacting as this organization." });
-                                   queryClient.clear();
-                                   navigate("/");
-                                 }
-                              }}>
-                              <LogIn className="h-3.5 w-3.5 mr-1" /> MASQUERADE
-                            </Button>
-                          )}
-
-                          {u.isActive ? (
-                            <Button variant="ghost" size="sm"
-                              className="h-8 text-[10px] font-mono text-warning hover:text-warning hover:bg-warning/10"
-                              onClick={() => updateUserMutation.mutate({ id: u.id, isActive: false })}>
-                              <EyeOff className="h-3.5 w-3.5 mr-1" /> REVOKE
-                            </Button>
-                          ) : (
-                            <Button variant="ghost" size="sm"
-                              className="h-8 text-[10px] font-mono text-success hover:text-success hover:bg-success/10"
-                              onClick={() => updateUserMutation.mutate({ id: u.id, isActive: true })}>
-                              <ShieldCheck className="h-3.5 w-3.5 mr-1" /> GRANT
-                            </Button>
-                          )}
-
-                          <Button variant="ghost" size="sm"
-                            className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                            disabled={u.role === "super_admin" || u.id === user?.id}
-                            onClick={() => { if(window.confirm("Permanently delete this user? This cannot be undone.")) deleteMutation.mutate(u.id); }}>
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      </td>
+            <>
+              {renderPagination("top")}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left bg-muted/20">
+                      <th className="px-6 py-4 text-xs text-muted-foreground font-medium">{activeTab === "clients" ? "Organization" : "User"}</th>
+                      <th className="px-6 py-4 text-xs text-muted-foreground font-medium">Contact</th>
+                      <th className="px-6 py-4 text-xs text-muted-foreground font-medium text-center">Status</th>
+                      {activeTab === "clients" ? (
+                        <>
+                          <th className="px-6 py-4 text-xs text-muted-foreground font-medium">Industry</th>
+                          <th className="px-6 py-4 text-xs text-muted-foreground font-medium">Plan</th>
+                        </>
+                      ) : (
+                        <>
+                          <th className="px-6 py-4 text-xs text-muted-foreground font-medium">Role</th>
+                          <th className="px-6 py-4 text-xs text-muted-foreground font-medium">Joined</th>
+                        </>
+                      )}
+                      <th className="px-6 py-4 text-xs text-muted-foreground font-medium text-right">Actions</th>
                     </tr>
-                    );
-                  })}
-                  {displayUsers.length === 0 && (
-                    <tr><td colSpan={6} className="px-6 py-12 text-center">
-                      <div className="flex flex-col items-center gap-3">
-                        {activeTab === "system" ? <ShieldCheck className="h-8 w-8 text-muted-foreground/30" /> : <Building2 className="h-8 w-8 text-muted-foreground/30" />}
-                        <p className="text-sm text-muted-foreground">No {activeTab === "system" ? "system staff" : "client accounts"} found.</p>
-                        <p className="text-xs text-muted-foreground/60">Use the button above to {activeTab === "system" ? "add internal staff" : "register a client"}.</p>
-                      </div>
-                    </td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {paginatedUsers.map((u) => {
+                      return (
+                        <tr key={u.id} className="border-b border-border/50 hover:bg-muted/10 transition-colors">
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-3">
+                              <div className={`h-9 w-9 rounded-full flex items-center justify-center shrink-0 ${activeTab === "system" ? "bg-primary/10 border border-primary/20" : "bg-emerald-500/10 border border-emerald-500/20"}`}>
+                                <span className={`font-mono font-bold text-sm ${activeTab === "system" ? "text-primary" : "text-emerald-400"}`}>
+                                  {(u.name || "?").substring(0, 2).toUpperCase()}
+                                </span>
+                              </div>
+                              <div>
+                                <p className="font-medium text-sm">{u.name || "—"}</p>
+                                {activeTab === "clients" && (u as ClientTenantData).legalName && (u as ClientTenantData).legalName !== u.name && (
+                                  <p className="text-[11px] text-muted-foreground">{(u as ClientTenantData).legalName}</p>
+                                )}
+                                {activeTab === "system" && (u as UserData).jobTitle && (
+                                  <p className="text-[11px] text-muted-foreground">{(u as UserData).jobTitle}</p>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <p className="text-xs text-muted-foreground font-mono flex items-center gap-1"><Mail className="h-3 w-3 shrink-0" />{u.email || "—"}</p>
+                            {u.phone && <p className="text-[11px] text-muted-foreground mt-0.5">{u.phone}</p>}
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${u.isActive ? "bg-success/20 text-success border border-success/30" : "bg-destructive/20 text-destructive border border-destructive/30"}`}>
+                              {u.isActive ? "Active" : "Suspended"}
+                            </span>
+                          </td>
+                          {activeTab === "clients" ? (
+                            <>
+                              <td className="px-6 py-4">
+                                <span className="text-xs text-muted-foreground">{(u as ClientTenantData).industry || "—"}</span>
+                              </td>
+                              <td className="px-6 py-4">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono uppercase ${(u as ClientTenantData).plan === "Enterprise" ? "bg-violet-500/15 text-violet-400 border border-violet-500/20" :
+                                  (u as ClientTenantData).plan === "Professional" ? "bg-primary/15 text-primary border border-primary/20" :
+                                    "bg-muted/30 text-muted-foreground border border-border"
+                                  }`}>{(u as ClientTenantData).plan || "Free"}</span>
+                              </td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="px-6 py-4">
+                                <span className={`px-2 py-1 rounded font-mono text-[10px] uppercase font-bold ${getRoleColor(u.role)}`}>{getRoleLabel(u.role)}</span>
+                              </td>
+                              <td className="px-6 py-4">
+                                <span className="text-xs text-muted-foreground font-mono">
+                                  {u.createdAt ? new Date(u.createdAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
+                                </span>
+                              </td>
+                            </>
+                          )}
+                          <td className="px-6 py-4">
+                            <div className="flex items-center justify-end gap-2">
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => setViewTarget(u)} title="View Account Details">
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => { setEditTarget(u); setEditForm({ name: u.name, phone: u.phone || "", jobTitle: u.jobTitle || "", role: u.role }); }} title="Edit Account">
+                                <UserCog className="h-4 w-4" />
+                              </Button>
+
+                              {activeTab === "clients" && isPlatformAdmin && (
+                                <Button variant="ghost" size="sm"
+                                  className="h-8 text-[10px] font-mono text-primary hover:text-primary hover:bg-primary/10"
+                                  onClick={async () => {
+                                    const tid = activeTab === "clients" ? (u as ClientTenantData).tenantId : (u as UserData).tenantId || "";
+                                    const result = await impersonateTenant(tid);
+                                    if (result.error) {
+                                      toast({ title: "Impersonation Failed", description: result.error, variant: "destructive" });
+                                    } else {
+                                      toast({ title: "Masquerade Active", description: "You are now interacting as this organization." });
+                                      queryClient.clear();
+                                      navigate("/");
+                                    }
+                                  }}>
+                                  <LogIn className="h-3.5 w-3.5 mr-1" /> MASQUERADE
+                                </Button>
+                              )}
+
+                              {u.isActive ? (
+                                <Button variant="ghost" size="sm"
+                                  className="h-8 text-[10px] font-mono text-warning hover:text-warning hover:bg-warning/10"
+                                  onClick={() => updateUserMutation.mutate({ id: u.id, isActive: false })}>
+                                  <EyeOff className="h-3.5 w-3.5 mr-1" /> REVOKE
+                                </Button>
+                              ) : (
+                                <Button variant="ghost" size="sm"
+                                  className="h-8 text-[10px] font-mono text-success hover:text-success hover:bg-success/10"
+                                  onClick={() => updateUserMutation.mutate({ id: u.id, isActive: true })}>
+                                  <ShieldCheck className="h-3.5 w-3.5 mr-1" /> GRANT
+                                </Button>
+                              )}
+
+                              <Button variant="ghost" size="sm"
+                                className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                disabled={u.role === "super_admin" || u.id === user?.id}
+                                onClick={() => { if (window.confirm("Permanently delete this user? This cannot be undone.")) deleteMutation.mutate(u.id); }}>
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {displayUsers.length === 0 && (
+                      <tr><td colSpan={6} className="px-6 py-12 text-center">
+                        <div className="flex flex-col items-center gap-3">
+                          {activeTab === "system" ? <ShieldCheck className="h-8 w-8 text-muted-foreground/30" /> : <Building2 className="h-8 w-8 text-muted-foreground/30" />}
+                          <p className="text-sm text-muted-foreground">No {activeTab === "system" ? "system staff" : "client accounts"} found.</p>
+                          <p className="text-xs text-muted-foreground/60">Use the button above to {activeTab === "system" ? "add internal staff" : "register a client"}.</p>
+                        </div>
+                      </td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              {renderPagination("bottom")}
+            </>
           )}
         </div>
       </div>

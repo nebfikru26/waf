@@ -5,6 +5,8 @@ using AffiniSecurity.Waf.Services;
 using AffiniSecurity.Waf.Data;
 using Microsoft.EntityFrameworkCore;
 
+using NATS.Client;
+
 namespace AffiniSecurity.Waf.Controllers
 {
     [Authorize(Policy = WafPolicies.RequirePlatformAdmin)]
@@ -15,12 +17,14 @@ namespace AffiniSecurity.Waf.Controllers
         private readonly IAuditService _auditService;
         private readonly WafDbContext _context;
         private readonly IClickHouseService _clickHouseService;
+        private readonly INatsService _natsService;
 
-        public ComplianceController(IAuditService auditService, WafDbContext context, IClickHouseService clickHouseService)
+        public ComplianceController(IAuditService auditService, WafDbContext context, IClickHouseService clickHouseService, INatsService natsService)
         {
             _auditService = auditService;
             _context = context;
             _clickHouseService = clickHouseService;
+            _natsService = natsService;
         }
 
         [HttpGet("status")]
@@ -29,16 +33,33 @@ namespace AffiniSecurity.Waf.Controllers
             try
             {
                 var isAuditIntact = await _auditService.VerifyIntegrityAsync();
-                long totalRequests = await _clickHouseService.GetTotalRequestsAsync();
+                
+                long totalRequests = 0;
+                bool clickHouseConnected = false;
+                try 
+                {
+                    totalRequests = await _clickHouseService.GetTotalRequestsAsync();
+                    clickHouseConnected = true;
+                } 
+                catch { }
+
+                bool natsConnected = false;
+                try
+                {
+                    natsConnected = _natsService.GetConnection()?.State == ConnState.CONNECTED;
+                }
+                catch { }
+
+                bool sidecarConnected = System.IO.File.Exists("/var/run/shared/ai.sock");
 
                 return Ok(new
                 {
                     Proclamations = new[]
                     {
-                        new { Id = "958/2016", Name = "Computer Crime", Status = "Compliant", Detail = "1-Year Metadata Retention Active via ClickHouse TTL" },
-                        new { Id = "1321/2024", Name = "Data Protection", Status = "Compliant", Detail = "PII Scrubber Active & Immutable Audit Chain Enabled" },
-                        new { Id = "808/2013", Name = "INSA Monitoring", Status = "Active", Detail = "Real-time SOC Streaming via NATS Operational" },
-                        new { Id = "1205/2020", Name = "Electronic Transactions", Status = "Resilient", Detail = "Fault-Bypass Routing via Caddy/NATS Active" }
+                        new { Id = "958/2016", Name = "Computer Crime", Status = clickHouseConnected ? "Compliant" : "Violation Detected", Detail = "1-Year Metadata Retention Active via ClickHouse TTL" },
+                        new { Id = "1321/2024", Name = "Data Protection", Status = isAuditIntact ? "Compliant" : "Violation Detected", Detail = "PII Scrubber Active & Immutable Audit Chain Enabled" },
+                        new { Id = "808/2013", Name = "INSA Monitoring", Status = natsConnected ? "Active" : "Degraded/Offline", Detail = "Real-time SOC Streaming via NATS Operational" },
+                        new { Id = "1205/2020", Name = "Electronic Transactions", Status = sidecarConnected ? "Resilient" : "Degraded", Detail = "Fault-Bypass Routing & AI Sidecar Active" }
                     },
                     AuditHealth = new
                     {

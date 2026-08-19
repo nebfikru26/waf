@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Text.Json.Serialization;
@@ -66,5 +67,18 @@ namespace AffiniSecurity.Waf.Models
         
         [JsonPropertyName("brandName")]
         public string? BrandName { get; set; }
+
+        /// <summary>Current step in the multi-step onboarding wizard (0 = not started, 5 = complete).</summary>
+        [JsonPropertyName("onboardingStep")]
+        public int OnboardingStep { get; set; } = 0;
+
+        [JsonIgnore]
+        public virtual ICollection<ServiceSubscription> Subscriptions { get; set; } = new List<ServiceSubscription>();
+        
+        [JsonIgnore]
+        public virtual PaymentInfo? Payment { get; set; }
+        
+        [JsonIgnore]
+        public virtual ICollection<TenantMember> Members { get; set; } = new List<TenantMember>();
     }
 }

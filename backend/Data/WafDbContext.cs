@@ -43,9 +43,16 @@ namespace AffiniSecurity.Waf.Data
         public DbSet<URIExclusion> URIExclusions { get; set; }
         public DbSet<KnownBot> KnownBots { get; set; }
         public DbSet<BlockedFingerprint> BlockedFingerprints { get; set; }
+
+        public DbSet<ServiceSubscription> ServiceSubscriptions { get; set; }
+        public DbSet<PaymentInfo> PaymentInfos { get; set; }
+        public DbSet<TenantMember> TenantMembers { get; set; }
         public DbSet<AuditLog> AuditLogs { get; set; }
         public DbSet<ApiKey> ApiKeys { get; set; }
         public DbSet<OWASPRuleExclusion> OWASPRuleExclusions { get; set; }
+        public DbSet<IocIndicator> IocIndicators { get; set; }
+        public DbSet<TenantRuleSet> TenantRuleSets { get; set; }
+        public DbSet<RuleSetTemplate> RuleSetTemplates { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

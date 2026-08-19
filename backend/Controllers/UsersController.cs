@@ -9,7 +9,7 @@ using AffiniSecurity.Waf.Security;
 
 namespace AffiniSecurity.Waf.Controllers
 {
-    [Authorize(Policy = WafPolicies.RequireFirewallManager)]
+    [Authorize(Policy = WafPolicies.RequireUserAdministrator)]
     [ApiController]
     [Route("api/users")]
     public class UsersController : ControllerBase
@@ -59,7 +59,7 @@ namespace AffiniSecurity.Waf.Controllers
                 Bio = string.Empty,
                 Role = model.Role,
                 Password = BCrypt.Net.BCrypt.HashPassword(model.Password),
-                TenantId = (role == "super_admin" || role == "support_engineer") ? model.TenantId ?? tenantId! : tenantId!
+                TenantId = (role == "super_admin" || role == "support_engineer" || role == "admin") ? model.TenantId ?? tenantId! : tenantId!
             };
 
             _context.Users.Add(user);
@@ -76,7 +76,7 @@ namespace AffiniSecurity.Waf.Controllers
             var user = await _context.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == id);
             if (user == null) return NotFound(new { error = "The specified user account could not be found." });
             
-            if (role != "super_admin" && role != "support_engineer" && user.TenantId != tenantId)
+            if (role != "super_admin" && role != "support_engineer" && role != "admin" && user.TenantId != tenantId)
                 return Forbid();
 
             _context.Users.Remove(user);
@@ -93,7 +93,7 @@ namespace AffiniSecurity.Waf.Controllers
             var user = await _context.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == id);
             if (user == null) return NotFound(new { error = "The specified user account could not be found." });
 
-            if (role != "super_admin" && role != "support_engineer" && user.TenantId != tenantId)
+            if (role != "super_admin" && role != "support_engineer" && role != "admin" && user.TenantId != tenantId)
                 return Forbid();
 
             if (model.Name != null) user.Name = model.Name;
@@ -115,7 +115,7 @@ namespace AffiniSecurity.Waf.Controllers
             var user = await _context.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == id);
             if (user == null) return NotFound(new { error = "The specified user account could not be found." });
 
-            if (role != "super_admin" && role != "support_engineer" && user.TenantId != tenantId)
+            if (role != "super_admin" && role != "support_engineer" && role != "admin" && user.TenantId != tenantId)
                 return Forbid();
 
             // Simulate sending email

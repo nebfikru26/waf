@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 export default function ProfilePage() {
   const { user, refreshUser } = useAuth();
   const { toast } = useToast();
-  
+
   const [isSaving, setIsSaving] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
@@ -25,8 +25,9 @@ export default function ProfilePage() {
   const [isLogoUploading, setIsLogoUploading] = useState(false);
 
   const [orgData, setOrgData] = useState({
-    legalName: "", manager: "", licenseNo: "", tinNo: "", 
-    category: "", industry: "", address: "", 
+    name: "",
+    legalName: "", manager: "", licenseNo: "", tinNo: "",
+    category: "", industry: "", address: "",
     contactEmail: "", contactPhone: "", website: ""
   });
 
@@ -40,6 +41,21 @@ export default function ProfilePage() {
         jobTitle: user.jobTitle || "",
         bio: user.bio || ""
       });
+      if (user.tenant) {
+        setOrgData(prev => ({
+          ...prev,
+          name: user.tenant?.name || "",
+          legalName: user.tenant?.legalName || "",
+          manager: user.tenant?.manager || "",
+          licenseNo: user.tenant?.licenseNo || "",
+          tinNo: user.tenant?.tinNo || "",
+          category: user.tenant?.category || "",
+          industry: user.tenant?.industry || "",
+          address: user.tenant?.address || "",
+          contactEmail: user.tenant?.contactEmail || "",
+          contactPhone: user.tenant?.contactPhone || ""
+        }));
+      }
     }
   }, [user]);
 
@@ -57,11 +73,17 @@ export default function ProfilePage() {
       if (res.ok) {
         const data = await res.json();
         setOrgData({
-          legalName: data.legalName || "", manager: data.manager || "",
-          licenseNo: data.licenseNo || "", tinNo: data.tinNo || "",
-          category: data.category || "", industry: data.industry || "",
-          address: data.address || "", contactEmail: data.contactEmail || "",
-          contactPhone: data.contactPhone || "", website: data.website || ""
+          name: data.name || "",
+          legalName: data.legalName || "",
+          manager: data.manager || "",
+          licenseNo: data.licenseNo || "",
+          tinNo: data.tinNo || "",
+          category: data.category || "",
+          industry: data.industry || "",
+          address: data.address || "",
+          contactEmail: data.contactEmail || "",
+          contactPhone: data.contactPhone || "",
+          website: data.website || ""
         });
       }
     } catch (e) {
@@ -95,8 +117,8 @@ export default function ProfilePage() {
     setIsOrgSaving(true);
     try {
       const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
-      const res = await fetch("/api/company/update", {
-        method: "POST",
+      const res = await fetch("/api/company", {
+        method: "PUT",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
         body: JSON.stringify(orgData)
       });
@@ -125,15 +147,15 @@ export default function ProfilePage() {
 
         <Tabs defaultValue="personal" className="w-full">
           <TabsList className="mb-6 w-full justify-start bg-transparent border-b border-border rounded-none h-auto p-0 space-x-6">
-            <TabsTrigger 
-              value="personal" 
+            <TabsTrigger
+              value="personal"
               className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 py-3 data-[state=active]:shadow-none"
             >
               <User className="h-4 w-4 mr-2" /> Personal Identity
             </TabsTrigger>
             {canEditOrg && (
-              <TabsTrigger 
-                value="organization" 
+              <TabsTrigger
+                value="organization"
                 className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 py-3 data-[state=active]:shadow-none"
               >
                 <Building2 className="h-4 w-4 mr-2" /> Organization Profile
@@ -153,7 +175,7 @@ export default function ProfilePage() {
                     <p className="text-lg font-bold">{user?.name}</p>
                     <p className="text-xs text-muted-foreground font-mono flex items-center gap-1.5"><Mail className="h-3 w-3" /> {user?.email}</p>
                     <div className="mt-1">
-                       <span className="text-[10px] bg-primary/20 text-primary px-2 py-0.5 rounded font-bold uppercase tracking-widest border border-primary/10">{user?.role}</span>
+                      <span className="text-[10px] bg-primary/20 text-primary px-2 py-0.5 rounded font-bold uppercase tracking-widest border border-primary/10">{user?.role}</span>
                     </div>
                   </div>
                 </div>
@@ -205,6 +227,10 @@ export default function ProfilePage() {
                   <form onSubmit={handleOrgSave} className="space-y-6 relative z-10">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-2">
+                        <label className="text-[11px] font-bold text-muted-foreground uppercase">Trade Name</label>
+                        <Input value={orgData.name} onChange={e => setOrgData({ ...orgData, name: e.target.value })} className="bg-muted/30" />
+                      </div>
+                      <div className="space-y-2">
                         <label className="text-[11px] font-bold text-muted-foreground uppercase">Legal Company Name</label>
                         <Input value={orgData.legalName} onChange={e => setOrgData({ ...orgData, legalName: e.target.value })} className="bg-muted/30" />
                       </div>
@@ -241,7 +267,7 @@ export default function ProfilePage() {
                         <Input value={orgData.website} onChange={e => setOrgData({ ...orgData, website: e.target.value })} placeholder="https://" className="bg-muted/30" />
                       </div>
                     </div>
-                    
+
                     <div className="space-y-2">
                       <label className="text-[11px] font-bold text-muted-foreground uppercase">Physical Address</label>
                       <Textarea value={orgData.address} onChange={e => setOrgData({ ...orgData, address: e.target.value })} className="bg-muted/30 min-h-[80px]" />
