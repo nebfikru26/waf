@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using AffiniSecurity.Waf.Data;
 using AffiniSecurity.Waf.Models;
 using Microsoft.EntityFrameworkCore;
+using AffiniSecurity.Waf.Security;
 
 namespace AffiniSecurity.Waf.Controllers
 {
@@ -16,6 +18,7 @@ namespace AffiniSecurity.Waf.Controllers
             _context = context;
         }
 
+        [Authorize]
         [HttpGet("config")]
         public async Task<IActionResult> GetConfig()
         {
@@ -33,6 +36,7 @@ namespace AffiniSecurity.Waf.Controllers
         }
 
         [HttpPut("config")]
+        [Authorize(Policy = WafPermissions.PlatformSettings)]
         public async Task<IActionResult> UpdateConfig([FromBody] SystemConfig config)
         {
             var existing = await _context.SystemConfigs.FirstOrDefaultAsync();

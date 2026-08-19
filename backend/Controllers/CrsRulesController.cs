@@ -55,6 +55,7 @@ namespace AffiniSecurity.Waf.Controllers
         }
 
         [HttpPost("rules")]
+        [Authorize(Policy = WafPermissions.FirewallManageGlobal)]
         public async Task<IActionResult> CreateRule([FromBody] OWASPRule newRule)
         {
             newRule.Id = Guid.NewGuid().ToString();
@@ -65,6 +66,7 @@ namespace AffiniSecurity.Waf.Controllers
         }
 
         [HttpDelete("rules/{id}")]
+        [Authorize(Policy = WafPermissions.FirewallManageGlobal)]
         public async Task<IActionResult> DeleteRule(string id)
         {
             var rule = await _context.OWASPRules.IgnoreQueryFilters().FirstOrDefaultAsync(r => r.Id == id && r.TenantId == null);

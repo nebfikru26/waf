@@ -4,6 +4,7 @@ using AffiniSecurity.Waf.Data;
 using AffiniSecurity.Waf.Models;
 using Microsoft.EntityFrameworkCore;
 using AffiniSecurity.Waf.Services;
+using AffiniSecurity.Waf.Security;
 
 namespace AffiniSecurity.Waf.Controllers
 {
@@ -37,6 +38,7 @@ namespace AffiniSecurity.Waf.Controllers
         }
 
         [HttpPost("domains")]
+        [Authorize(Policy = WafPermissions.DomainsManage)]
         public async Task<IActionResult> CreateDomain([FromBody] Domain domain)
         {
             if (await _context.Domains.IgnoreQueryFilters().AnyAsync(d => d.DomainName == domain.DomainName))
@@ -58,6 +60,7 @@ namespace AffiniSecurity.Waf.Controllers
         }
 
         [HttpPut("domains/{id}")]
+        [Authorize(Policy = WafPermissions.DomainsManage)]
         public async Task<IActionResult> UpdateDomain(string id, [FromBody] Domain domain)
         {
             // Filter guarantees we can only find domains belonging to current tenant
@@ -93,6 +96,7 @@ namespace AffiniSecurity.Waf.Controllers
         }
 
         [HttpDelete("domains/{id}")]
+        [Authorize(Policy = WafPermissions.DomainsManage)]
         public async Task<IActionResult> DeleteDomain(string id)
         {
             var domain = await _context.Domains.FirstOrDefaultAsync(d => d.Id == id);
