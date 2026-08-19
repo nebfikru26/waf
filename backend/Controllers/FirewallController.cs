@@ -9,11 +9,13 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System;
 using System.Linq;
+using System.Collections.Generic;
 using AffiniSecurity.Waf.Services;
 
 namespace AffiniSecurity.Waf.Controllers
 {
-    [Authorize(Policy = WafPolicies.RequireFirewallManager)]
+    // Default: read access. Mutating endpoints below explicitly require FirewallEdit.
+    [Authorize(Policy = WafPermissions.FirewallView)]
     [ApiController]
     [Route("api/firewall")]
     public class FirewallController : ControllerBase
@@ -99,6 +101,7 @@ namespace AffiniSecurity.Waf.Controllers
         }
 
         [HttpPost("mode")]
+        [Authorize(Policy = WafPermissions.FirewallEdit)]
         public async Task<IActionResult> SetGlobalMode([FromBody] WafModeUpdateModel model)
         {
             Console.WriteLine($"[WAF-MODE] Request to change mode to: {model?.Mode}");
@@ -143,12 +146,15 @@ namespace AffiniSecurity.Waf.Controllers
                 .Where(r => r.TenantId == null)
                 .ToListAsync();
 
-            var tenantOverrides = await _context.OWASPRules
+            var tenantOverridesList = await _context.OWASPRules
                 .IgnoreQueryFilters()
                 .AsNoTracking()
                 .Where(r => r.TenantId == tenantId && r.RuleId != null)
-                .GroupBy(r => r.RuleId)
-                .ToDictionaryAsync(g => g.Key, g => g.First());
+                .ToListAsync();
+
+            var tenantOverrides = tenantOverridesList
+                .GroupBy(r => r.RuleId!)
+                .ToDictionary(g => g.Key, g => g.First());
 
             // Merge: overlay tenant action on global baseline
             foreach (var rule in globalRules)
@@ -162,6 +168,7 @@ namespace AffiniSecurity.Waf.Controllers
         }
 
         [HttpPatch("owasp-rules/{id}")]
+        [Authorize(Policy = WafPermissions.FirewallEdit)]
         public async Task<IActionResult> UpdateOWASPRule(string id, [FromBody] RuleActionUpdateModel model)
         {
             var tenantId = _context.CurrentTenantId;
@@ -251,6 +258,7 @@ namespace AffiniSecurity.Waf.Controllers
         }
 
         [HttpPost("owasp-exclusions")]
+        [Authorize(Policy = WafPermissions.FirewallEdit)]
         public async Task<IActionResult> AddOWASPExclusion([FromBody] CreateExclusionModel model)
         {
             var tenantId = _context.CurrentTenantId;
@@ -276,6 +284,7 @@ namespace AffiniSecurity.Waf.Controllers
         }
 
         [HttpPut("owasp-exclusions/{id}")]
+        [Authorize(Policy = WafPermissions.FirewallEdit)]
         public async Task<IActionResult> UpdateOWASPExclusion(string id, [FromBody] CreateExclusionModel model)
         {
             var tenantId = _context.CurrentTenantId;
@@ -298,6 +307,7 @@ namespace AffiniSecurity.Waf.Controllers
         }
 
         [HttpDelete("owasp-exclusions/{id}")]
+        [Authorize(Policy = WafPermissions.FirewallEdit)]
         public async Task<IActionResult> DeleteOWASPExclusion(string id)
         {
             var tenantId = _context.CurrentTenantId;
@@ -328,6 +338,7 @@ namespace AffiniSecurity.Waf.Controllers
         }
 
         [HttpPost("rules")]
+        [Authorize(Policy = WafPermissions.FirewallEdit)]
         public async Task<IActionResult> CreateRule([FromBody] IPRule rule)
         {
 
@@ -338,6 +349,7 @@ namespace AffiniSecurity.Waf.Controllers
         }
 
         [HttpDelete("rules/{id}")]
+        [Authorize(Policy = WafPermissions.FirewallEdit)]
         public async Task<IActionResult> DeleteRule(string id)
         {
 
@@ -359,6 +371,7 @@ namespace AffiniSecurity.Waf.Controllers
         }
 
         [HttpPost("custom-rules")]
+        [Authorize(Policy = WafPermissions.FirewallEdit)]
         public async Task<IActionResult> CreateCustomRule([FromBody] CustomRule rule)
         {
             var tenantId = _context.CurrentTenantId;
@@ -383,6 +396,7 @@ namespace AffiniSecurity.Waf.Controllers
         }
 
         [HttpPatch("custom-rules/{id}")]
+        [Authorize(Policy = WafPermissions.FirewallEdit)]
         public async Task<IActionResult> UpdateCustomRule(string id, [FromBody] CustomRuleUpdateModel model)
         {
 
@@ -396,6 +410,7 @@ namespace AffiniSecurity.Waf.Controllers
         }
 
         [HttpPut("custom-rules/{id}")]
+        [Authorize(Policy = WafPermissions.FirewallEdit)]
         public async Task<IActionResult> UpdateCustomRuleFull(string id, [FromBody] CustomRule updateModel)
         {
             var rule = await _context.CustomRules.FirstOrDefaultAsync(r => r.Id == id);
@@ -434,6 +449,7 @@ namespace AffiniSecurity.Waf.Controllers
         }
 
         [HttpDelete("custom-rules/{id}")]
+        [Authorize(Policy = WafPermissions.FirewallEdit)]
         public async Task<IActionResult> DeleteCustomRule(string id)
         {
             var rule = await _context.CustomRules.FirstOrDefaultAsync(r => r.Id == id);
@@ -461,6 +477,7 @@ namespace AffiniSecurity.Waf.Controllers
         }
 
         [HttpPost("custom-rules/{id}/rollback/{versionId}")]
+        [Authorize(Policy = WafPermissions.FirewallEdit)]
         public async Task<IActionResult> RollbackRule(string id, string versionId)
         {
             var rule = await _context.CustomRules.FirstOrDefaultAsync(r => r.Id == id);
@@ -514,6 +531,7 @@ namespace AffiniSecurity.Waf.Controllers
         }
 
         [HttpPost("custom-rules/import")]
+        [Authorize(Policy = WafPermissions.FirewallEdit)]
         public async Task<IActionResult> ImportCustomRules([FromBody] List<CustomRule> importedRules)
         {
             if (importedRules == null || !importedRules.Any()) 
@@ -557,6 +575,7 @@ namespace AffiniSecurity.Waf.Controllers
         }
 
         [HttpPost("uri-exclusions")]
+        [Authorize(Policy = WafPermissions.FirewallEdit)]
         public async Task<IActionResult> CreateUriExclusion([FromBody] URIExclusion exclusion)
         {
 
@@ -566,6 +585,7 @@ namespace AffiniSecurity.Waf.Controllers
         }
 
         [HttpPatch("uri-exclusions/{id}")]
+        [Authorize(Policy = WafPermissions.FirewallEdit)]
         public async Task<IActionResult> UpdateUriExclusion(string id, [FromBody] URIUpdateModel model)
         {
 
@@ -578,6 +598,7 @@ namespace AffiniSecurity.Waf.Controllers
         }
 
         [HttpDelete("uri-exclusions/{id}")]
+        [Authorize(Policy = WafPermissions.FirewallEdit)]
         public async Task<IActionResult> DeleteUriExclusion(string id)
         {
 
@@ -591,8 +612,29 @@ namespace AffiniSecurity.Waf.Controllers
 
         // --- Settings (Geo & Rate Limit) ---
 
+        private async Task SyncToRedis(SecuritySettings settings, IRedisService redisService)
+        {
+            var isEnabledStr = settings.MlDetectionEnabled.ToString().ToLower();
+            // 1. Sync by TenantId
+            await redisService.SetValueAsync($"tenant:ai:{settings.TenantId}:enabled", isEnabledStr);
+
+            // 2. Sync by DomainNames associated with this TenantId
+            var domains = await _context.Domains
+                .IgnoreQueryFilters()
+                .Where(d => d.TenantId == settings.TenantId)
+                .ToListAsync();
+
+            foreach (var domain in domains)
+            {
+                if (!string.IsNullOrEmpty(domain.DomainName))
+                {
+                    await redisService.SetValueAsync($"tenant:ai:{domain.DomainName}:enabled", isEnabledStr);
+                }
+            }
+        }
+
         [HttpGet("settings")]
-        public async Task<IActionResult> GetSettings()
+        public async Task<IActionResult> GetSettings([FromServices] IRedisService redisService)
         {
             var settings = await _context.SecuritySettings.FirstOrDefaultAsync();
             if (settings == null)
@@ -601,31 +643,51 @@ namespace AffiniSecurity.Waf.Controllers
                 _context.SecuritySettings.Add(settings);
                 await _context.SaveChangesAsync();
             }
+            await SyncToRedis(settings, redisService);
             return Ok(settings);
         }
 
         [HttpPut("settings")]
-        public async Task<IActionResult> UpdateSettings([FromBody] SecuritySettings settings)
+        [Authorize(Policy = WafPermissions.FirewallEdit)]
+        public async Task<IActionResult> UpdateSettings([FromBody] SecuritySettings settings, [FromServices] IRedisService redisService)
         {
-
             var existing = await _context.SecuritySettings.FirstOrDefaultAsync();
             if (existing == null)
             {
                 _context.SecuritySettings.Add(settings);
-            }
-            else
-            {
-                existing.GeoEnabled = settings.GeoEnabled;
-                existing.GeoMode = settings.GeoMode;
-                existing.GeoAllowlist = settings.GeoAllowlist;
-                existing.GeoBlocklist = settings.GeoBlocklist;
-                existing.RateLimitRps = settings.RateLimitRps;
-                existing.WafMode = settings.WafMode;
-                _context.Entry(existing).State = EntityState.Modified;
+                await _context.SaveChangesAsync();
+                await SyncToRedis(settings, redisService);
+                return Ok(settings);
             }
 
+            // Map all properties to prevent loss of settings during partial updates
+            existing.GeoEnabled = settings.GeoEnabled;
+            existing.GeoMode = settings.GeoMode;
+            existing.GeoAllowlist = settings.GeoAllowlist;
+            existing.GeoBlocklist = settings.GeoBlocklist;
+            existing.RateLimitRps = settings.RateLimitRps;
+            existing.WafMode = settings.WafMode;
+            
+            // Also preserve/map new attributes added for the modular engine
+            existing.BotProtectionEnabled = settings.BotProtectionEnabled;
+            existing.JsChallengeEnabled = settings.JsChallengeEnabled;
+            existing.CaptchaEnabled = settings.CaptchaEnabled;
+            existing.FingerprintingEnabled = settings.FingerprintingEnabled;
+            existing.MlDetectionEnabled = settings.MlDetectionEnabled;
+            existing.DdosProtectionEnabled = settings.DdosProtectionEnabled;
+            existing.L7ProtectionEnabled = settings.L7ProtectionEnabled;
+            existing.DdosThresholdRps = settings.DdosThresholdRps;
+            existing.SensitivityLevel = settings.SensitivityLevel;
+
+            _context.Entry(existing).State = EntityState.Modified;
             await _context.SaveChangesAsync();
-            return Ok(existing ?? settings);
+            
+            await SyncToRedis(existing, redisService);
+            
+            // Also trigger configuration regeneration
+            await _configGenerator.GenerateAndReloadAsync();
+
+            return Ok(existing);
         }
     }
 

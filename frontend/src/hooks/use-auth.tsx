@@ -40,12 +40,20 @@ export interface AuthUser {
   planName: string;
   entitlements: Entitlements;
   tenant?: {
+    id: string;
     name: string;
+    domain: string;
     address?: string;
     industry?: string;
     contactPhone?: string;
     contactEmail?: string;
+    legalName?: string;
+    tinNo?: string;
+    licenseNo?: string;
+    category?: string;
+    manager?: string;
     isProfileComplete: boolean;
+    onboardingStep: number;
   };
   isImpersonating?: boolean;
 }
@@ -55,7 +63,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   tenant: AuthUser["tenant"] | null;
-  login: (email: string, password: string) => Promise<{ error?: string }>;
+  login: (email: string, password: string, rememberMe?: boolean) => Promise<{ error?: string }>;
   signup: (payload: any) => Promise<{ error?: string; message?: string }>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ error?: string }>;
@@ -71,116 +79,62 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    // Auth is carried entirely by the HttpOnly `waf_session` cookie the backend sets on
+    // login/signup — it is never readable from JS, so we always just ask the server who
+    // we are (via the cookie sent automatically with `credentials: "include"`) instead of
+    // gating this on a client-readable token.
     const initAuth = async () => {
-      const lToken = localStorage.getItem("auth_token");
-      const sToken = sessionStorage.getItem("auth_token");
-      const token = lToken || sToken;
-
-      console.log(`[Auth] Initializing with token from ${lToken ? "localStorage" : sToken ? "sessionStorage" : "none"}`);
-
-      if (token) {
-        try {
-          const res = await fetch("/api/profile", {
-            headers: { "Authorization": `Bearer ${token}` }
+      try {
+        const res = await fetch("/api/profile", { credentials: "include" });
+        if (res.ok) {
+          const data = await res.json();
+          const pc = data.planConfig || data.plan;
+          setUser({
+            id: data.id || "",
+            email: data.email || "",
+            name: data.name || "",
+            phone: data.phone,
+            jobTitle: data.jobTitle,
+            bio: data.bio,
+            role: data.role as Role,
+            tenantId: data.tenantId || "",
+            planName: pc?.name || "Free",
+            entitlements: {
+              maxDomains: pc?.maxDomains || 1,
+              hasWafDetection: pc?.hasWafDetection || false,
+              hasWafBlocking: pc?.hasWafBlocking || false,
+              hasApiProtection: pc?.hasApiProtection || false,
+              hasBotProtection: pc?.hasBotProtection || false,
+              hasDdosProtection: pc?.hasDdosProtection || false,
+              hasAccountTakeover: pc?.hasAccountTakeover || false,
+              hasRateLimiting: pc?.hasRateLimiting || false,
+              hasSslManagement: pc?.hasSslManagement || false,
+              hasThreatIntel: pc?.hasThreatIntel || false,
+              hasAttackLogs: pc?.hasAttackLogs || false,
+              hasNotifications: pc?.hasNotifications || false,
+              hasAnalytics: pc?.hasAnalytics || false,
+            },
+            tenant: {
+              id: data.tenantId || "",
+              name: data.tenantName || "",
+              domain: data.tenantDomain || "",
+              isProfileComplete: data.isProfileComplete ?? true,
+              onboardingStep: data.onboardingStep ?? 5,
+              legalName: data.legalName,
+              tinNo: data.tinNo,
+              licenseNo: data.licenseNo,
+              category: data.category,
+              manager: data.manager,
+              address: data.address
+            },
+            isImpersonating: !!data.isImpersonating
           });
-          if (res.ok) {
-            const data = await res.json();
-            const pc = data.planConfig || data.plan;
-            setUser({
-              id: data.id || "",
-              email: data.email || "",
-              name: data.name || "",
-              phone: data.phone,
-              jobTitle: data.jobTitle,
-              bio: data.bio,
-              role: data.role as Role,
-              tenantId: data.tenantId || "",
-              planName: pc?.name || "Free",
-              entitlements: {
-                maxDomains: pc?.maxDomains || 1,
-                hasWafDetection: pc?.hasWafDetection || false,
-                hasWafBlocking: pc?.hasWafBlocking || false,
-                hasApiProtection: pc?.hasApiProtection || false,
-                hasBotProtection: pc?.hasBotProtection || false,
-                hasDdosProtection: pc?.hasDdosProtection || false,
-                hasAccountTakeover: pc?.hasAccountTakeover || false,
-                hasRateLimiting: pc?.hasRateLimiting || false,
-                hasSslManagement: pc?.hasSslManagement || false,
-                hasThreatIntel: pc?.hasThreatIntel || false,
-                hasAttackLogs: pc?.hasAttackLogs || false,
-                hasNotifications: pc?.hasNotifications || false,
-                hasAnalytics: pc?.hasAnalytics || false,
-              },
-              tenant: {
-                name: data.tenantName || "",
-                isProfileComplete: data.isProfileComplete || false
-              },
-              isImpersonating: !!localStorage.getItem("admin_token")
-            });
-          } else {
-            // If we have an admin_token backup, this is a failed impersonation reload.
-            // Restore the admin token instead of silently logging the user out.
-            const adminToken = localStorage.getItem("admin_token");
-            if (adminToken) {
-              localStorage.setItem("auth_token", adminToken);
-              localStorage.removeItem("admin_token");
-              // Retry loading with the restored admin token
-              const adminRes = await fetch("/api/profile", {
-                headers: { "Authorization": `Bearer ${adminToken}` }
-              });
-              if (adminRes.ok) {
-                const data = await adminRes.json();
-                const pc = data.planConfig || data.plan;
-                setUser({
-                  id: data.id || "",
-                  email: data.email || "",
-                  name: data.name || "",
-                  phone: data.phone,
-                  jobTitle: data.jobTitle,
-                  bio: data.bio,
-                  role: data.role as Role,
-                  tenantId: data.tenantId || "",
-                  planName: pc?.name || "Free",
-                  entitlements: {
-                    maxDomains: pc?.maxDomains || 1,
-                    hasWafDetection: pc?.hasWafDetection || false,
-                    hasWafBlocking: pc?.hasWafBlocking || false,
-                    hasApiProtection: pc?.hasApiProtection || false,
-                    hasBotProtection: pc?.hasBotProtection || false,
-                    hasDdosProtection: pc?.hasDdosProtection || false,
-                    hasAccountTakeover: pc?.hasAccountTakeover || false,
-                    hasRateLimiting: pc?.hasRateLimiting || false,
-                    hasSslManagement: pc?.hasSslManagement || false,
-                    hasThreatIntel: pc?.hasThreatIntel || false,
-                    hasAttackLogs: pc?.hasAttackLogs || false,
-                    hasNotifications: pc?.hasNotifications || false,
-                    hasAnalytics: pc?.hasAnalytics || false,
-                  },
-                  tenant: {
-                    name: data.tenantName || "",
-                    isProfileComplete: data.isProfileComplete || false
-                  },
-                  isImpersonating: false
-                });
-              } else {
-                if (adminRes.status === 401 || adminRes.status === 403) {
-                  localStorage.removeItem("auth_token");
-                  sessionStorage.removeItem("auth_token");
-                }
-              }
-            } else {
-              if (res.status === 401 || res.status === 403) {
-                localStorage.removeItem("auth_token");
-                sessionStorage.removeItem("auth_token");
-              }
-            }
-          }
-        } catch (error) {
-          console.error("Auth initialization failed:", error);
-        } finally {
-          setIsLoading(false);
         }
-      } else {
+        // A non-OK response (e.g. 401) simply means there is no active session — leave
+        // `user` as null and let the app route to the login page as normal.
+      } catch (error) {
+        console.error("Auth initialization failed:", error);
+      } finally {
         setIsLoading(false);
       }
     };
@@ -194,6 +148,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const response = await fetch("/api/auth/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          credentials: "include",
           body: JSON.stringify({ email: "admin@affinisecurity.io", password: "Password123!" }),
         });
 
@@ -203,15 +158,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         const data = await response.json();
-        if (data.token) {
-          if (rememberMe) {
-            localStorage.setItem("auth_token", data.token);
-            sessionStorage.removeItem("auth_token");
-          } else {
-            sessionStorage.setItem("auth_token", data.token);
-            localStorage.removeItem("auth_token");
-          }
-        }
 
         const pc = data.planConfig || data.plan;
         setUser({
@@ -237,8 +183,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             hasAnalytics: pc?.hasAnalytics ?? true,
           },
           tenant: {
+            id: data.user.tenantId,
             name: data.tenant?.name || "System Organization",
-            isProfileComplete: data.tenant?.isProfileComplete || true
+            domain: data.tenant?.domain || "",
+            contactPhone: data.tenant?.contactPhone || "",
+            contactEmail: data.tenant?.contactEmail || "",
+            isProfileComplete: data.tenant?.isProfileComplete ?? true,
+            onboardingStep: data.tenant?.onboardingStep ?? 5,
+            legalName: data.tenant?.legalName,
+            tinNo: data.tenant?.tinNo,
+            licenseNo: data.tenant?.licenseNo,
+            category: data.tenant?.category
           }
         });
         return {};
@@ -247,6 +202,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ email, password }),
       });
 
@@ -260,22 +216,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { error: `Server error (${response.status}): The API is unreachable or returned an invalid response.` };
       }
 
-      localStorage.removeItem("dev_logged_out");
-
       if (!response.ok) {
         return { error: data.error || "Incorrect email or password." };
       }
 
-      if (data.token) {
-        console.log(`[Auth] Login successful, rememberMe: ${rememberMe}`);
-        if (rememberMe) {
-          localStorage.setItem("auth_token", data.token);
-          sessionStorage.removeItem("auth_token");
-        } else {
-          sessionStorage.setItem("auth_token", data.token);
-          localStorage.removeItem("auth_token");
-        }
-      }
+      // The session token is delivered as an HttpOnly cookie by the backend — nothing to
+      // persist client-side. `rememberMe` no longer changes storage; a longer-lived cookie
+      // (30 days) is always issued, matching the JWT's own expiry.
 
       const pc = data.planConfig || data.plan;
       setUser({
@@ -304,12 +251,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           hasAnalytics: pc?.hasAnalytics || false,
         },
         tenant: {
+          id: data.user.tenantId,
           name: data.tenant?.name || "",
+          domain: data.tenant?.domain || "",
           address: data.tenant?.address,
           industry: data.tenant?.industry,
           contactPhone: data.tenant?.contactPhone,
           contactEmail: data.tenant?.contactEmail,
-          isProfileComplete: data.tenant?.isProfileComplete || false
+          isProfileComplete: data.tenant?.isProfileComplete ?? true,
+          onboardingStep: data.tenant?.onboardingStep ?? 5,
+          legalName: data.tenant?.legalName,
+          tinNo: data.tenant?.tinNo,
+          licenseNo: data.tenant?.licenseNo,
+          category: data.tenant?.category,
+          manager: data.tenant?.manager
         }
       });
       return {};
@@ -320,16 +275,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signup = async (payload: any) => {
     try {
+      // Signup is intentionally minimal (name + email + password). Organization details
+      // (legal name, TIN, license, category, industry, address) are collected afterward in
+      // the post-signup CompanyOnboarding wizard — the backend defaults them until then.
       const formattedPayload = {
         email: payload.userEmail,
         name: payload.userName,
-        password: payload.password,
-        companyName: payload.name,
-        phone: payload.userPhone
+        password: payload.password
       };
       const response = await fetch("/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify(formattedPayload)
       });
 
@@ -347,8 +304,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
-    localStorage.removeItem("auth_token");
-    sessionStorage.removeItem("auth_token");
+    try {
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    } catch (e) {
+      console.error("Logout request failed", e);
+    }
     setUser(null);
     window.location.href = "/login";
   };
@@ -356,11 +316,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshUser = async () => {
     if (!user) return;
     try {
-      const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
-      if (!token) return;
-      const res = await fetch("/api/profile", {
-        headers: { "Authorization": `Bearer ${token}` }
-      });
+      const res = await fetch("/api/profile", { credentials: "include" });
       if (!res.ok) return;
       const data = await res.json();
       setUser(prev => prev ? {
@@ -385,8 +341,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         tenant: {
           ...prev.tenant,
           name: data.tenantName || prev.tenant?.name || "",
-          isProfileComplete: data.isProfileComplete ?? prev.tenant?.isProfileComplete ?? false
-        }
+          isProfileComplete: data.isProfileComplete ?? prev.tenant?.isProfileComplete ?? true,
+          onboardingStep: data.onboardingStep ?? prev.tenant?.onboardingStep ?? 5,
+          legalName: data.legalName || prev.tenant?.legalName,
+          tinNo: data.tinNo || prev.tenant?.tinNo,
+          licenseNo: data.licenseNo || prev.tenant?.licenseNo,
+          category: data.category || prev.tenant?.category,
+          manager: data.manager || prev.tenant?.manager,
+          address: data.address || prev.tenant?.address
+        } as NonNullable<AuthUser["tenant"]>
       } : null);
     } catch (e) {
       console.error("Failed to refresh user context", e);
@@ -402,27 +365,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const platformRoles: Role[] = ["super_admin", "support_engineer", "admin"];
     if (!user || !platformRoles.includes(user.role)) return { error: "Unauthorized" };
     try {
-      const token = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
       const response = await fetch(`/api/admin/impersonate/${tenantId}`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
-        }
+        headers: { "Content-Type": "application/json" },
+        credentials: "include"
       });
       const data = await response.json();
       if (!response.ok) return { error: data.error || "Impersonation failed." };
 
-      if (data.token) {
-        // Save current admin token FIRST before clearing anything
-        const currentToken = (localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token")) || sessionStorage.getItem("auth_token");
-        if (currentToken) localStorage.setItem("admin_token", currentToken);
-
-        // Now swap to tenant token
-        localStorage.removeItem("auth_token");
-        sessionStorage.removeItem("auth_token");
-        localStorage.setItem("auth_token", data.token);
-      }
+      // The backend swaps the active session cookie to the impersonated tenant admin's
+      // token and stashes our own admin session in a separate HttpOnly backup cookie —
+      // nothing to do with client-side storage here.
 
       const pc = data.planConfig || data.plan;
       // Set user state directly from API response — no page reload needed
@@ -452,12 +405,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           hasAnalytics: pc?.hasAnalytics || false,
         },
         tenant: {
+          id: data.user.tenantId,
           name: data.tenant?.name || "",
+          domain: data.tenant?.domain || "",
           address: data.tenant?.address,
           industry: data.tenant?.industry,
           contactPhone: data.tenant?.contactPhone,
           contactEmail: data.tenant?.contactEmail,
-          isProfileComplete: data.tenant?.isProfileComplete || false
+          isProfileComplete: data.tenant?.isProfileComplete ?? true,
+          onboardingStep: data.tenant?.onboardingStep ?? 5,
+          legalName: data.tenant?.legalName,
+          tinNo: data.tenant?.tinNo,
+          licenseNo: data.tenant?.licenseNo,
+          category: data.tenant?.category
         },
         isImpersonating: true
       });
@@ -472,13 +432,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const unimpersonateTenant = async () => {
     try {
-      // Restore admin token
-      const adminToken = localStorage.getItem("admin_token");
-      if (adminToken) {
-        localStorage.setItem("auth_token", adminToken);
-        localStorage.removeItem("admin_token");
+      // The backend restores the admin's own session from the HttpOnly backup cookie
+      // stashed during impersonateTenant — there is no client-side token to restore.
+      const response = await fetch("/api/admin/unimpersonate", {
+        method: "POST",
+        credentials: "include"
+      });
+      if (!response.ok) {
+        let error = "Failed to exit masquerade";
+        try {
+          const data = await response.json();
+          error = data.error || error;
+        } catch (e) { /* ignore non-JSON error body */ }
+        return { error };
       }
-      // Full page reload to /admin — initAuth will restore admin session cleanly
+      // Full page reload to /admin — initAuth will restore the admin session cleanly
+      // from the now-restored `waf_session` cookie.
       window.location.href = "/admin";
       return {};
     } catch (err) {

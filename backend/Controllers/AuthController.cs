@@ -17,11 +17,13 @@ namespace AffiniSecurity.Waf.Controllers
     {
         private readonly WafDbContext _context;
         private readonly IConfiguration _configuration;
+        private readonly IWebHostEnvironment _env;
 
-        public AuthController(WafDbContext context, IConfiguration configuration)
+        public AuthController(WafDbContext context, IConfiguration configuration, IWebHostEnvironment env)
         {
             _context = context;
             _configuration = configuration;
+            _env = env;
         }
 
         [HttpGet("ping")]
@@ -30,13 +32,14 @@ namespace AffiniSecurity.Waf.Controllers
             return Ok(new { message = "pong", timestamp = DateTime.UtcNow });
         }
 
-        [HttpGet("debug-users")]
-        public async Task<IActionResult> DebugUsers()
+        [HttpPost("logout")]
+        public IActionResult Logout()
         {
-            var users = await _context.Users.IgnoreQueryFilters()
-                .Select(u => new { u.Email, u.Role, u.TenantId, u.IsActive })
-                .ToListAsync();
-            return Ok(users);
+            // Clear both the active session cookie and any stashed admin-impersonation
+            // backup cookie so no residual HttpOnly credential is left behind.
+            AffiniSecurity.Waf.Security.CookieAuth.ClearSessionCookie(Response, _env.IsDevelopment());
+            AffiniSecurity.Waf.Security.CookieAuth.ClearAdminBackupCookie(Response, _env.IsDevelopment());
+            return Ok(new { message = "Logged out." });
         }
 
         [HttpPost("signup")]
@@ -64,19 +67,20 @@ namespace AffiniSecurity.Waf.Controllers
 
             var tenant = new Tenant 
             { 
-                Name = string.IsNullOrEmpty(request.CompanyName) ? $"{request.Name}'s Org" : request.CompanyName,
-                LegalName = string.IsNullOrEmpty(request.CompanyName) ? $"{request.Name}'s Org" : request.CompanyName,
+                Name = companyName,
+                LegalName = string.IsNullOrWhiteSpace(request.LegalName) ? companyName : request.LegalName,
                 Manager = request.Name,
-                LicenseNo = "PENDING",
-                TinNo = "PENDING",
-                Address = "PENDING",
-                Industry = "Other",
-                Category = "Private",
-                ContactPhone = "PENDING",
+                LicenseNo = string.IsNullOrWhiteSpace(request.LicenseNo) ? "PENDING" : request.LicenseNo,
+                TinNo = string.IsNullOrWhiteSpace(request.TinNo) ? "PENDING" : request.TinNo,
+                Address = string.IsNullOrWhiteSpace(request.Address) ? "PENDING" : request.Address,
+                Industry = string.IsNullOrWhiteSpace(request.Industry) ? "Other" : request.Industry,
+                Category = string.IsNullOrWhiteSpace(request.Category) ? "Private" : request.Category,
+                ContactPhone = request.Phone,
                 ContactEmail = request.Email,
                 ContactPerson = request.Name,
                 Website = "https://",
-                IsProfileComplete = false
+                IsProfileComplete = false,
+                OnboardingStep = 1
             };
 
             var user = new User
@@ -107,16 +111,37 @@ namespace AffiniSecurity.Waf.Controllers
                 planConfig = await _context.PlanConfigs.FirstOrDefaultAsync(p => p.Name == "Free");
 
             var token = GenerateJwtToken(user);
+            AffiniSecurity.Waf.Security.CookieAuth.SetSessionCookie(Response, token, _env.IsDevelopment());
             return Ok(new AuthResponse { 
                 Token = token, 
-                User = user, 
-                Tenant = new Tenant {
+                User = new UserDTO {
+                    Id = user.Id,
+                    Email = user.Email,
+                    Name = user.Name,
+                    Role = user.Role,
+                    TenantId = user.TenantId
+                }, 
+                Tenant = new TenantDTO {
                     Id = tenant.Id,
                     Name = tenant.Name,
+                    LegalName = tenant.LegalName,
+                    TinNo = tenant.TinNo,
+                    LicenseNo = tenant.LicenseNo,
+                    Category = tenant.Category,
+                    Industry = tenant.Industry,
+                    Manager = tenant.Manager,
+                    Address = tenant.Address,
+                    ContactEmail = tenant.ContactEmail,
+                    ContactPhone = tenant.ContactPhone,
                     PrimaryColor = "#3b82f6",
-                    IsActive = true
+                    IsProfileComplete = tenant.IsProfileComplete,
+                    OnboardingStep = tenant.OnboardingStep
                 }, 
-                Plan = subscription ?? new Subscription { TenantId = tenant.Id, PlanName = "Free" },
+                Plan = new SubscriptionDTO {
+                    Id = subscription?.Id ?? Guid.NewGuid().ToString(),
+                    PlanName = subscription?.PlanName ?? "Free",
+                    Status = subscription?.Status ?? "Active"
+                },
                 PlanConfig = planConfig
             });
         }
@@ -136,6 +161,9 @@ namespace AffiniSecurity.Waf.Controllers
             if (!BCrypt.Net.BCrypt.Verify(request.Password, user.Password))
             {
                 Console.WriteLine($"[Login] Password mismatch for: {request.Email}");
+                Console.WriteLine($"[Login] Requested Password Length: {request.Password?.Length}");
+                Console.WriteLine($"[Login] Stored Hash Length: {user.Password?.Length}");
+                Console.WriteLine($"[Login] Stored Hash Start: {user.Password?.Substring(0, 10)}");
                 return Unauthorized(new { error = "Invalid email or password. Please verify your credentials and try again." });
             }
 
@@ -164,29 +192,64 @@ namespace AffiniSecurity.Waf.Controllers
                 planConfig = await _context.PlanConfigs.IgnoreQueryFilters().FirstOrDefaultAsync(p => p.Name == "Free");
 
             var token = GenerateJwtToken(user);
+            AffiniSecurity.Waf.Security.CookieAuth.SetSessionCookie(Response, token, _env.IsDevelopment());
             return Ok(new AuthResponse { 
                 Token = token, 
-                User = user, 
-                Tenant = new Tenant {
+                User = new UserDTO {
+                    Id = user.Id,
+                    Email = user.Email,
+                    Name = user.Name,
+                    Role = user.Role,
+                    TenantId = user.TenantId
+                }, 
+                Tenant = new TenantDTO {
                     Id = tenant.Id,
                     Name = tenant.Name,
-                    Address = tenant.Address,
+                    LegalName = tenant.LegalName,
+                    TinNo = tenant.TinNo,
+                    LicenseNo = tenant.LicenseNo,
+                    Category = tenant.Category,
                     Industry = tenant.Industry,
-                    ContactPhone = tenant.ContactPhone,
+                    Manager = tenant.Manager,
+                    Address = tenant.Address,
                     ContactEmail = tenant.ContactEmail,
-                    IsProfileComplete = tenant.IsProfileComplete,
+                    ContactPhone = tenant.ContactPhone,
                     LogoUrl = tenant.LogoUrl,
                     PrimaryColor = tenant.PrimaryColor,
-                    BrandName = tenant.BrandName
+                    BrandName = tenant.BrandName,
+                    IsProfileComplete = tenant.IsProfileComplete,
+                    OnboardingStep = tenant.OnboardingStep
                 }, 
-                Plan = subscription ?? new Subscription { TenantId = user.TenantId, PlanName = "Free" },
+                Plan = new SubscriptionDTO {
+                    Id = subscription?.Id ?? Guid.NewGuid().ToString(),
+                    PlanName = subscription?.PlanName ?? "Free",
+                    Status = subscription?.Status ?? "Active"
+                },
                 PlanConfig = planConfig
             });
+        }
+
+        [HttpPost("reset-password")]
+        public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request)
+        {
+            var user = await _context.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Email == request.Email);
+            
+            if (user == null)
+            {
+                return BadRequest(new { error = "User not found. Please check the email address." });
+            }
+
+            user.Password = BCrypt.Net.BCrypt.HashPassword(request.Password);
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = "Password updated successfully." });
         }
 
         private string GenerateJwtToken(User user)
         {
             var jwtSecret = _configuration["Waf:JwtSecret"] ?? "default-secret-key-123-replace-in-production";
+            var jwtIssuer = _configuration["Waf:JwtIssuer"];
+            var jwtAudience = _configuration["Waf:JwtAudience"];
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
@@ -198,6 +261,8 @@ namespace AffiniSecurity.Waf.Controllers
             };
 
             var token = new JwtSecurityToken(
+                issuer: string.IsNullOrEmpty(jwtIssuer) ? null : jwtIssuer,
+                audience: string.IsNullOrEmpty(jwtAudience) ? null : jwtAudience,
                 claims: claims,
                 expires: DateTime.Now.AddDays(30),
                 signingCredentials: creds

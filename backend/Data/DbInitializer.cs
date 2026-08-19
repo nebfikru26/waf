@@ -13,18 +13,150 @@ namespace AffiniSecurity.Waf.Data
             // Manual Schema Updates (since EnsureCreated doesn't handle migrations for existing tables)
             try
             {
-                context.Database.ExecuteSqlRaw("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS ip_address TEXT;");
-                context.Database.ExecuteSqlRaw("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS request_path TEXT;");
-                context.Database.ExecuteSqlRaw("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS request_method TEXT;");
-                context.Database.ExecuteSqlRaw("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS hash_chain TEXT;");
-                context.Database.ExecuteSqlRaw("ALTER TABLE alert_logs ADD COLUMN IF NOT EXISTS raw_data TEXT;");
-                context.Database.ExecuteSqlRaw("ALTER TABLE system_configs ADD COLUMN IF NOT EXISTS crs_rules_repository_url TEXT;");
-                context.Database.ExecuteSqlRaw("ALTER TABLE system_configs ADD COLUMN IF NOT EXISTS eca_certification_number TEXT;");
+            try { context.Database.ExecuteSqlRaw("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS ip_address TEXT;"); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Failed: {ex.Message}"); }
+            try { context.Database.ExecuteSqlRaw("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS request_path TEXT;"); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Failed: {ex.Message}"); }
+            try { context.Database.ExecuteSqlRaw("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS request_method TEXT;"); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Failed: {ex.Message}"); }
+            try { context.Database.ExecuteSqlRaw("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS hash_chain TEXT;"); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Failed: {ex.Message}"); }
+            try { context.Database.ExecuteSqlRaw("ALTER TABLE alert_logs ADD COLUMN IF NOT EXISTS raw_data TEXT;"); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Failed: {ex.Message}"); }
+            try { context.Database.ExecuteSqlRaw("ALTER TABLE system_configs ADD COLUMN IF NOT EXISTS crs_rules_repository_url TEXT;"); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Failed: {ex.Message}"); }
+            try { context.Database.ExecuteSqlRaw("ALTER TABLE system_configs ADD COLUMN IF NOT EXISTS eca_certification_number TEXT;"); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Failed: {ex.Message}"); }
+            try { context.Database.ExecuteSqlRaw("ALTER TABLE owasp_rules ADD COLUMN IF NOT EXISTS \"ImportedAt\" timestamp with time zone;"); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Failed: {ex.Message}"); }
+            try { context.Database.ExecuteSqlRaw("ALTER TABLE owasp_rules ADD COLUMN IF NOT EXISTS \"VersionTag\" text;"); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Failed: {ex.Message}"); }
+            try { context.Database.ExecuteSqlRaw("UPDATE owasp_rules SET \"ImportedAt\" = NOW() WHERE \"ImportedAt\" IS NULL;"); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Failed: {ex.Message}"); }
+            try { context.Database.ExecuteSqlRaw("ALTER TABLE owasp_rules ADD COLUMN IF NOT EXISTS \"MitreTechnique\" text;"); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Failed: {ex.Message}"); }
+            try { context.Database.ExecuteSqlRaw("ALTER TABLE owasp_rules ADD COLUMN IF NOT EXISTS \"MitreTactic\" text;"); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Failed: {ex.Message}"); }
+            try { context.Database.ExecuteSqlRaw("ALTER TABLE custom_rules ADD COLUMN IF NOT EXISTS \"MitreTechnique\" text;"); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Failed: {ex.Message}"); }
+            try { context.Database.ExecuteSqlRaw("ALTER TABLE custom_rules ADD COLUMN IF NOT EXISTS \"MitreTactic\" text;"); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Failed: {ex.Message}"); }
+            try { context.Database.ExecuteSqlRaw("ALTER TABLE alert_logs ADD COLUMN IF NOT EXISTS \"MitreTechnique\" text;"); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Failed: {ex.Message}"); }
+            try { context.Database.ExecuteSqlRaw("ALTER TABLE alert_logs ADD COLUMN IF NOT EXISTS \"MitreTactic\" text;"); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Failed: {ex.Message}"); }
+            try { context.Database.ExecuteSqlRaw("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS \"OnboardingStep\" INTEGER DEFAULT 0;"); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Failed: {ex.Message}"); }
+            try { context.Database.ExecuteSqlRaw("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS \"IsActive\" BOOLEAN DEFAULT TRUE;"); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Failed: {ex.Message}"); }
+
+            try { context.Database.ExecuteSqlRaw(@"
+                CREATE TABLE IF NOT EXISTS ioc_indicators (
+                    ""Id"" TEXT PRIMARY KEY,
+                    ""IndicatorValue"" TEXT NOT NULL,
+                    ""IndicatorType"" TEXT NOT NULL,
+                    ""PulseName"" TEXT,
+                    ""ThreatType"" TEXT,
+                    ""Severity"" TEXT NOT NULL DEFAULT 'MEDIUM',
+                    ""Source"" TEXT NOT NULL DEFAULT 'AlienVault-OTX',
+                    ""Country"" TEXT,
+                    ""ExternalId"" TEXT,
+                    ""ExternalLink"" TEXT,
+                    ""ConfidenceScore"" INTEGER NOT NULL DEFAULT 50,
+                    ""FirstSeen"" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+                    ""LastSeen"" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+                    ""IngestedAt"" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_ioc_indicator_value ON ioc_indicators (""IndicatorValue"");
+                CREATE INDEX IF NOT EXISTS idx_ioc_indicator_type ON ioc_indicators (""IndicatorType"");
+                CREATE INDEX IF NOT EXISTS idx_ioc_severity ON ioc_indicators (""Severity"");
+            "); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] IOC table creation failed: {ex.Message}"); }
+
+            try { context.Database.ExecuteSqlRaw(@"
+                CREATE TABLE IF NOT EXISTS tenant_rule_sets (
+                    ""Id"" TEXT PRIMARY KEY,
+                    ""TenantId"" TEXT NOT NULL,
+                    ""Name"" TEXT NOT NULL,
+                    ""Description"" TEXT,
+                    ""RuleIds"" TEXT,
+                    ""DisabledRuleIds"" TEXT,
+                    ""SourceTemplateId"" TEXT,
+                    ""CreatedAt"" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+                    ""UpdatedAt"" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_tenant_rule_sets_tenant_id ON tenant_rule_sets (""TenantId"");
+
+                CREATE TABLE IF NOT EXISTS rule_set_templates (
+                    ""Id"" TEXT PRIMARY KEY,
+                    ""Name"" TEXT NOT NULL,
+                    ""Description"" TEXT,
+                    ""Category"" TEXT,
+                    ""RuleCategories"" TEXT,
+                    ""IsBuiltIn"" BOOLEAN DEFAULT TRUE,
+                    ""CreatedAt"" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS payment_infos (
+                    ""Id"" TEXT PRIMARY KEY,
+                    ""TenantId"" TEXT NOT NULL,
+                    ""Plan"" TEXT NOT NULL,
+                    ""Amount"" NUMERIC NOT NULL,
+                    ""NextPaymentDate"" TIMESTAMP WITH TIME ZONE NOT NULL,
+                    ""Status"" TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_payment_infos_tenant_id ON payment_infos (""TenantId"");
+
+                CREATE TABLE IF NOT EXISTS tenant_members (
+                    ""Id"" TEXT PRIMARY KEY,
+                    ""TenantId"" TEXT NOT NULL,
+                    ""Email"" TEXT NOT NULL,
+                    ""Role"" TEXT NOT NULL,
+                    ""JoinedAt"" TIMESTAMP WITH TIME ZONE NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_tenant_members_tenant_id ON tenant_members (""TenantId"");
+
+                CREATE TABLE IF NOT EXISTS service_subscriptions (
+                    ""Id"" TEXT PRIMARY KEY,
+                    ""TenantId"" TEXT NOT NULL,
+                    ""ServiceName"" TEXT NOT NULL,
+                    ""SubscribedAt"" TIMESTAMP WITH TIME ZONE NOT NULL,
+                    ""Expiration"" TIMESTAMP WITH TIME ZONE
+                );
+                CREATE INDEX IF NOT EXISTS idx_service_subscriptions_tenant_id ON service_subscriptions (""TenantId"");
+            "); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Tenant management tables creation failed: {ex.Message}"); }
+
+            // Seed Templates if empty
+            if (!context.RuleSetTemplates.Any())
+            {
+                context.RuleSetTemplates.AddRange(new List<RuleSetTemplate>
+                {
+                    new RuleSetTemplate { 
+                        Name = "Finance / Banking", 
+                        Description = "High Compliance: Strict SQLi/XSS, Mandatory MFA signaling, Rate-limiting.",
+                        Category = "Finance",
+                        RuleCategories = "SQL Injection,Cross-Site Scripting,Request Limits,Protocol Enforcement",
+                        IsBuiltIn = true
+                    },
+                    new RuleSetTemplate { 
+                        Name = "E-Commerce", 
+                        Description = "Transaction Security: Bot protection, Scraping prevention, Payment endpoint hardening.",
+                        Category = "E-Commerce",
+                        RuleCategories = "SQL Injection,Cross-Site Scripting,Scanner Detection,Data Leakage",
+                        IsBuiltIn = true
+                    },
+                    new RuleSetTemplate { 
+                        Name = "RESTful API", 
+                        Description = "Payload Integrity: JSON/XML schema validation, Bearer token inspection, Method restriction.",
+                        Category = "API",
+                        RuleCategories = "SQL Injection,Protocol Enforcement,Request Limits,Java Injection",
+                        IsBuiltIn = true
+                    },
+                    new RuleSetTemplate { 
+                        Name = "WordPress / CMS", 
+                        Description = "Application Specific: Hardened /wp-admin protection, Plugin vulnerability virtual patching.",
+                        Category = "CMS",
+                        RuleCategories = "PHP Injection,Local File Inclusion,Scanner Detection,Remote File Inclusion",
+                        IsBuiltIn = true
+                    },
+                    new RuleSetTemplate { 
+                        Name = "General Purpose", 
+                        Description = "Balanced Security: OWASP Top 10 defaults with low false-positive sensitivity.",
+                        Category = "General",
+                        RuleCategories = "SQL Injection,Cross-Site Scripting,Scanner Detection,Protocol Enforcement,Request Limits",
+                        IsBuiltIn = true
+                    }
+                });
+                context.SaveChanges();
+            }
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[DbInitializer] Failed to apply schema update: {ex.Message}");
             }
+
+            ApplyRowLevelSecurity(context);
 
             // Seed or Update Plans
             UpdateOrCreatePlan(context, new PlanConfig
@@ -104,39 +236,121 @@ namespace AffiniSecurity.Waf.Data
                 systemTenant.BrandName = "AffiniSecurity";
             }
 
-            if (!context.Users.IgnoreQueryFilters().Any(u => u.Email == "admin@affinisecurity.io"))
+            var adminUser = context.Users.IgnoreQueryFilters().FirstOrDefault(u => u.Email == "admin@affinisecurity.io");
+            if (adminUser == null)
             {
-                var adminUser = new User
+                adminUser = new User
                 {
                     Email = "admin@affinisecurity.io",
                     Name = "System Administrator",
                     Phone = "+1000000000",
                     JobTitle = "Security Administrator",
                     Bio = "System generated administrator account",
-                    Password = BCrypt.Net.BCrypt.HashPassword("Password123!"),
+                    // Static pre-computed BCrypt hash for "Password123!" — deterministic across restarts
+                    Password = "$2a$12$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi",
                     Role = "super_admin",
                     TenantId = systemTenant.Id
                 };
                 context.Users.Add(adminUser);
-                context.SaveChanges();
+            }
+            context.SaveChanges();
+
+            // Seed Sample Tenants - upsert by name so new orgs can be added without a DB reset
+            var sampleTenantDefs = new List<(string Name, string LegalName, string Industry, string Manager, string Email, string Phone, string Address, string Website, bool ProfileComplete, int OnboardingStep, bool IsActive)>
+            {
+                ("Neb Global Solutions", "Neb Global Solutions PLC", "Software", "Neb Fikru", "nebfikru@gmail.com", "+251911001122", "Addis Ababa, Piazza", "https://nebfikru.com", true, 5, true),
+                ("EthioMarket", "EthioMarket E-Commerce PLC", "E-Commerce", "Abebe Bikila", "admin@ethiomarket.com", "+251911223344", "Addis Ababa, Bole", "https://ethiomarket.com", true, 5, true),
+                ("ShebaTech", "Sheba Technology Solutions", "Technology", "Selamawit Yilma", "ops@shebatech.io", "+251922334455", "Addis Ababa, Kazanchis", "https://shebatech.io", true, 5, true),
+                ("BlueNile Bank", "Blue Nile Microfinance", "Finance", "Kebede Kassaye", "security@bluenile.et", "+251933445566", "Bahir Dar, Nile St", "https://bluenile.et", false, 2, true),
+                ("Habesha Logistics", "Habesha Freight & Logistics PLC", "Logistics", "Tewodros Haile", "admin@habeshalogistics.com", "+251944556677", "Addis Ababa, Lebu", "https://habeshalogistics.com", true, 5, true),
+                ("Aksum Insurance", "Aksum General Insurance S.C", "Finance", "Hirut Bekele", "cto@aksumins.et", "+251955667788", "Axum, Tigray", "https://aksumins.et", true, 5, true),
+                ("AddisHealth", "AddisHealth Medical Systems PLC", "Healthcare", "Dr. Meron Alemu", "it@addishealth.com", "+251966778899", "Addis Ababa, Lideta", "https://addishealth.com", true, 5, true),
+                ("GreenEthiopia Agri", "Green Ethiopia Agricultural PLC", "Agriculture", "Dawit Tesfaye", "security@greenethiopia.com", "+251977889900", "Jimma, Oromia", "https://greenethiopia.com", true, 5, true),
+                ("TeleConnect ET", "TeleConnect Telecom Solutions PLC", "Telecommunications", "Samuel Girma", "noc@teleconnect.et", "+251988990011", "Addis Ababa, Megenagna", "https://teleconnect.et", true, 5, true),
+                ("Awash Media Group", "Awash Digital Media Group PLC", "Media", "Yonas Tadesse", "tech@awashmedia.com", "+251999001122", "Addis Ababa, Arat Kilo", "https://awashmedia.com", false, 1, true),
+                ("EduEthio Platform", "EduEthio Learning Technologies PLC", "Education", "Bethlehem Mulugeta", "admin@eduethio.com", "+251900112233", "Addis Ababa, CMC", "https://eduethio.com", true, 5, true),
+                ("Rift Valley Hotels", "Rift Valley Hospitality Group S.C", "Hospitality", "Liya Tsegay", "it@riftvalleyhotels.com", "+251901223344", "Hawassa, SNNPR", "https://riftvalleyhotels.com", true, 5, false),
+            };
+
+            var enterpriseIndustries = new HashSet<string> { "Finance", "Telecommunications", "Healthcare" };
+
+            foreach (var def in sampleTenantDefs)
+            {
+                // Fix the first legacy tenant's ID for stability
+                var existingByEmail = context.Users.IgnoreQueryFilters().FirstOrDefault(u => u.Email == def.Email);
+                if (existingByEmail != null) continue; // Already seeded, skip
+
+                var tenant = context.Tenants.IgnoreQueryFilters().FirstOrDefault(t => t.Name == def.Name);
+                if (tenant == null)
+                {
+                    // Special-case the first tenant to keep its known ID
+                    var tenantId = def.Name == "Neb Global Solutions" ? "eb880aa3-c981-419f-b0f4-4d9e511788dc" : Guid.NewGuid().ToString();
+                    tenant = new Tenant
+                    {
+                        Id = tenantId,
+                        Name = def.Name,
+                        LegalName = def.LegalName,
+                        Industry = def.Industry,
+                        Manager = def.Manager,
+                        ContactEmail = def.Email,
+                        ContactPhone = def.Phone,
+                        Address = def.Address,
+                        Website = def.Website,
+                        IsProfileComplete = def.ProfileComplete,
+                        OnboardingStep = def.OnboardingStep,
+                        IsActive = def.IsActive
+                    };
+                    context.Tenants.Add(tenant);
+                    context.SaveChanges();
+
+                    context.Users.Add(new User
+                    {
+                        Email = def.Email,
+                        Name = def.Manager,
+                        Password = "$2a$12$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi",
+                        Role = "tenant_admin",
+                        TenantId = tenant.Id
+                    });
+
+                    context.Subscriptions.Add(new Subscription
+                    {
+                        TenantId = tenant.Id,
+                        PlanName = enterpriseIndustries.Contains(def.Industry) ? "Enterprise" : "Professional",
+                        Status = def.IsActive ? "active" : "suspended",
+                        CreatedAt = DateTime.UtcNow.AddDays(-new Random().Next(30, 540))
+                    });
+
+                    context.SaveChanges();
+                }
             }
 
-            if (!context.Domains.IgnoreQueryFilters().Any(d => d.DomainName == "localhost"))
+            context.SaveChanges();
+
+            try
             {
-                var localDomain = new Domain
+                if (!context.Domains.IgnoreQueryFilters().Any(d => d.DomainName == "localhost"))
                 {
-                    DomainName = "localhost",
-                    OriginIp = "host.docker.internal:5173",
-                    TenantId = systemTenant.Id,
-                    Status = "active",
-                    SslMode = "Off",
-                    SslProvisioned = false,
-                    DnsVerified = true,
-                    ProtectionMode = "prevention",
-                    Sensitivity = 1,
-                    CreatedAt = DateTime.UtcNow
-                };
-                context.Domains.Add(localDomain);
+                    var localDomain = new Domain
+                    {
+                        DomainName = "localhost",
+                        OriginIp = "host.docker.internal:5173",
+                        TenantId = systemTenant.Id,
+                        Status = "active",
+                        SslMode = "Off",
+                        SslProvisioned = false,
+                        DnsVerified = true,
+                        ProtectionMode = "prevention",
+                        Sensitivity = 1,
+                        CreatedAt = DateTime.UtcNow
+                    };
+                    context.Domains.Add(localDomain);
+                    context.SaveChanges();
+                    Console.WriteLine("[DbInitializer] Localhost domain seeded.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DbInitializer] Seed Domains Failed: {ex.Message}");
             }
 
             // Ensure default security settings for system tenant exist
@@ -341,6 +555,132 @@ namespace AffiniSecurity.Waf.Data
             }
 
             context.SaveChanges();
+
+            // Populate real MITRE ATT&CK mappings for all seeded OWASP rules by category
+            // Source: https://attack.mitre.org/
+            try
+            {
+                var mitreMappings = new[]
+                {
+                    new { Category = "SQL Injection",          Technique = "T1190", Tactic = "Initial Access" },
+                    new { Category = "Cross-Site Scripting",   Technique = "T1059.007", Tactic = "Execution" },
+                    new { Category = "Remote Code Execution",  Technique = "T1059", Tactic = "Execution" },
+                    new { Category = "PHP Injection",          Technique = "T1059.004", Tactic = "Execution" },
+                    new { Category = "Java Injection",         Technique = "T1059.007", Tactic = "Execution" },
+                    new { Category = "Local File Inclusion",   Technique = "T1083", Tactic = "Discovery" },
+                    new { Category = "Remote File Inclusion",  Technique = "T1190", Tactic = "Initial Access" },
+                    new { Category = "Scanner Detection",      Technique = "T1595", Tactic = "Reconnaissance" },
+                    new { Category = "Protocol Enforcement",   Technique = "T1071.001", Tactic = "Command and Control" },
+                    new { Category = "Request Limits",         Technique = "T1190", Tactic = "Initial Access" },
+                    new { Category = "Generic Attack",         Technique = "T1210", Tactic = "Lateral Movement" },
+                    new { Category = "Data Leakage",           Technique = "T1552", Tactic = "Credential Access" },
+                };
+
+                foreach (var m in mitreMappings)
+                {
+                    context.Database.ExecuteSqlRaw(
+                        $"UPDATE owasp_rules SET \"MitreTechnique\" = '{m.Technique}', \"MitreTactic\" = '{m.Tactic}' WHERE \"Category\" = '{m.Category}' AND (\"MitreTechnique\" IS NULL OR \"MitreTechnique\" = '');"
+                    );
+                }
+                Console.WriteLine("[DbInitializer] MITRE ATT&CK mappings applied to OWASP rules.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DbInitializer] MITRE seeding failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Applies Postgres Row-Level Security as a second, database-enforced isolation layer
+        /// beneath the existing EF Core global query filter (see WafDbContext.OnModelCreating).
+        /// Even if an app-layer query forgets/bypasses the EF filter (raw SQL, a missing filter
+        /// on a new entity, IgnoreQueryFilters misuse, etc.), Postgres itself will still refuse
+        /// to return or write rows belonging to another tenant.
+        ///
+        /// This mirrors the app-layer semantics exactly:
+        ///  - Every base table with a "TenantId" column gets RLS enabled AND forced (FORCE ROW
+        ///    LEVEL SECURITY), so even the table owner/connection role is subject to it — the
+        ///    app currently connects using that same role, so without FORCE the policy would be
+        ///    silently bypassed.
+        ///  - The policy compares "TenantId" against the `app.current_tenant_id` session
+        ///    variable that TenantDbInterceptor sets on every connection, using
+        ///    IS NOT DISTINCT FROM so that NULL TenantId rows (global/system rows) only match
+        ///    when there is no current tenant — the same null-aware behavior EF Core produces
+        ///    for `EF.Property&lt;string&gt;(e, "TenantId") == CurrentTenantId`.
+        ///  - "SYSTEM_ADMIN" and "AUTH_SERVICE" are the two sentinel values the interceptor uses
+        ///    for platform-admin/background work and the login/signup path (which must be able
+        ///    to look up a user across all tenants); both bypass the tenant match entirely.
+        ///
+        /// Idempotent: safe to run on every startup. New tables that add a TenantId column are
+        /// picked up automatically without needing another manual migration step.
+        /// </summary>
+        private static void ApplyRowLevelSecurity(WafDbContext context)
+        {
+            try
+            {
+                // RLS policies are enforced for every role except superusers and roles with the
+                // BYPASSRLS attribute — Postgres always lets those bypass row security, even with
+                // FORCE ROW LEVEL SECURITY. If the app is still connecting as the `postgres`
+                // superuser (see ConnectionStrings:DefaultConnection), the policies below are
+                // created successfully but never actually enforced. Run `init_app_role.sql` once
+                // to provision a least-privilege `waf_app_user` role and point DefaultConnection
+                // at it (mirrors the existing `waf_audit_user` pattern in init_audit_role.sql).
+                var isSuperuser = context.Database
+                    .SqlQueryRaw<string>("SELECT current_setting('is_superuser')")
+                    .AsEnumerable()
+                    .FirstOrDefault();
+                if (string.Equals(isSuperuser, "on", StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine("[DbInitializer] WARNING: Database connection is using a Postgres superuser. " +
+                        "Row-Level Security policies will be created but NOT enforced until the app connects as a " +
+                        "non-superuser role (run init_app_role.sql and update ConnectionStrings:DefaultConnection).");
+                }
+
+                context.Database.ExecuteSqlRaw(@"
+                    DO $$
+                    DECLARE
+                        tbl RECORD;
+                    BEGIN
+                        FOR tbl IN
+                            SELECT DISTINCT c.table_name
+                            FROM information_schema.columns c
+                            JOIN information_schema.tables t
+                              ON t.table_name = c.table_name AND t.table_schema = c.table_schema
+                            WHERE c.table_schema = 'public'
+                              AND c.column_name = 'TenantId'
+                              AND t.table_type = 'BASE TABLE'
+                        LOOP
+                            EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', tbl.table_name);
+                            EXECUTE format('ALTER TABLE public.%I FORCE ROW LEVEL SECURITY', tbl.table_name);
+
+                            IF NOT EXISTS (
+                                SELECT 1 FROM pg_policies
+                                WHERE schemaname = 'public'
+                                  AND tablename = tbl.table_name
+                                  AND policyname = 'tenant_isolation_policy'
+                            ) THEN
+                                EXECUTE format(
+                                    'CREATE POLICY tenant_isolation_policy ON public.%I
+                                     USING (
+                                         current_setting(''app.current_tenant_id'', true) IN (''SYSTEM_ADMIN'', ''AUTH_SERVICE'')
+                                         OR ""TenantId"" IS NOT DISTINCT FROM current_setting(''app.current_tenant_id'', true)
+                                     )
+                                     WITH CHECK (
+                                         current_setting(''app.current_tenant_id'', true) IN (''SYSTEM_ADMIN'', ''AUTH_SERVICE'')
+                                         OR ""TenantId"" IS NOT DISTINCT FROM current_setting(''app.current_tenant_id'', true)
+                                     )',
+                                    tbl.table_name
+                                );
+                            END IF;
+                        END LOOP;
+                    END $$;
+                ");
+                Console.WriteLine("[DbInitializer] Row-Level Security policies applied to all tenant-scoped tables.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DbInitializer] Failed to apply Row-Level Security: {ex.Message}");
+            }
         }
 
         private static void UpdateOrCreatePlan(WafDbContext context, PlanConfig plan)

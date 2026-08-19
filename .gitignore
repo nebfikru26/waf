@@ -1,5 +1,20 @@
 # .gitignore for AffiniSecurity WAF
 
+# Runtime secrets — NEVER commit
+.env
+.env.*
+!.env.example
+
+# TLS private keys/certs and runtime nginx artifacts (self-signed dev certs, live audit
+# logs, IPC signal files) — never belong in version control regardless of environment.
+backend/nginx/ssl/*.key
+backend/nginx/ssl/*.crt
+backend/nginx/ssl/*.pem
+backend/nginx/logs/
+backend/nginx/reload.signal
+
+# Design docs / working documents — not source, kept local only
+*.docx
 # .NET (Backend)
 [Bb]in/
 [Oo]bj/
@@ -32,6 +47,23 @@ rules_resp.json
 response.json
 test_export.json
 *.local
+.superadmin_token
+*_token.txt
+
+# Ad-hoc/scratch debug scripts (should live in a tests/ or scripts/ dir, not repo root,
+# and must never contain hardcoded credentials — use env vars instead)
+/test_*.js
+/test_*.py
+/test_*.sh
+/test-*.js
+/test-*.cjs
+/screenshot.js
+/diagnostic.cs
+/temp_fragment.txt
+/fix_tabs.js
+frontend/test-*.js
+frontend/test-*.cjs
+frontend/test_*.js
 
 # Build/Logs
 build_log.txt

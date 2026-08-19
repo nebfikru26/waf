@@ -5,7 +5,17 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>AffiniSecurity.Waf</RootNamespace>
+    <NoWarn>$(NoWarn);CS8618;CS8600;CS8601;CS8602;CS8603;CS8604;CS8618;CS8619;CS8620;CS8621;CS8625;CS8632;CS8605;CS8714;EF1002;CS1998;CS0219</NoWarn>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The test project lives in a subfolder of this project's directory; exclude it from
+         this project's default globbing so its files/dependencies aren't compiled twice. -->
+    <Compile Remove="AffiniSecurity.Waf.Tests/**/*.cs" />
+    <Content Remove="AffiniSecurity.Waf.Tests/**/*" />
+    <None Remove="AffiniSecurity.Waf.Tests/**/*" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.0">

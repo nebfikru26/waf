@@ -5,12 +5,13 @@ using AffiniSecurity.Waf.Models;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Cryptography;
 using System.Text;
+using AffiniSecurity.Waf.Security;
 
 namespace AffiniSecurity.Waf.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    [Authorize(Roles = "tenant_admin,super_admin,admin")]
+    [Authorize(Policy = WafPermissions.ApiKeysManage)]
     public class ApiKeyController : ControllerBase
     {
         private readonly WafDbContext _context;

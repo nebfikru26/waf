@@ -61,7 +61,21 @@ namespace AffiniSecurity.Waf.Controllers
                 role = user.Role,
                 tenantId = user.TenantId,
                 tenantName = tenant?.Name,
+                legalName = tenant?.LegalName,
+                tinNo = tenant?.TinNo,
+                licenseNo = tenant?.LicenseNo,
+                category = tenant?.Category,
+                industry = tenant?.Industry,
+                address = tenant?.Address,
+                manager = tenant?.Manager,
+                contactEmail = tenant?.ContactEmail,
+                contactPhone = tenant?.ContactPhone,
                 isProfileComplete = tenant?.IsProfileComplete,
+                onboardingStep = tenant?.OnboardingStep,
+                // Whether the current session is an admin masquerading as this tenant — derived
+                // from the HttpOnly backup cookie stashed server-side during Impersonate, since
+                // that cookie is never readable by client-side script.
+                isImpersonating = Request.Cookies.ContainsKey(AffiniSecurity.Waf.Security.CookieAuth.AdminBackupCookieName),
                 plan = subscription ?? new Subscription { TenantId = user.TenantId, PlanName = "Free" },
                 planConfig = planConfig == null ? null : new {
                     id = planConfig.Id,
@@ -104,6 +118,20 @@ namespace AffiniSecurity.Waf.Controllers
             await _context.SaveChangesAsync();
             return Ok(user);
         }
+        [HttpPut("password")]
+        public async Task<IActionResult> UpdatePassword([FromBody] UpdatePasswordModel model)
+        {
+            var email = User.FindFirstValue(ClaimTypes.Email);
+            if (string.IsNullOrEmpty(email)) return Unauthorized();
+
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == email);
+            if (user == null) return NotFound();
+
+            user.Password = BCrypt.Net.BCrypt.HashPassword(model.Password);
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = "Password updated successfully" });
+        }
     }
 
     public class UpdateProfileModel
@@ -120,4 +148,11 @@ namespace AffiniSecurity.Waf.Controllers
         [JsonPropertyName("bio")]
         public string? Bio { get; set; }
     }
+
+    public class UpdatePasswordModel
+    {
+        [JsonPropertyName("password")]
+        public string Password { get; set; } = string.Empty;
+    }
 }
+
