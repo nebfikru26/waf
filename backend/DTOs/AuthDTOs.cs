@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text.Json.Serialization;
 using AffiniSecurity.Waf.Models;
 
@@ -64,6 +65,14 @@ namespace AffiniSecurity.Waf.DTOs
         [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
         [JsonPropertyName("role")] public string Role { get; set; } = string.Empty;
         [JsonPropertyName("tenantId")] public string TenantId { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Named permissions granted to this user's role (see WafPermissions), so the
+        /// frontend can gate UI affordances (buttons/menus) on the same claims the backend
+        /// authorization policies enforce, instead of hardcoding role-name checks that can
+        /// drift out of sync with the server-side source of truth.
+        /// </summary>
+        [JsonPropertyName("permissions")] public List<string> Permissions { get; set; } = new();
     }
 
     public class TenantDTO

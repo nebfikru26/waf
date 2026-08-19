@@ -181,7 +181,8 @@ namespace AffiniSecurity.Waf.Controllers
                     jobTitle = user.JobTitle,
                     bio = user.Bio,
                     role = user.Role,
-                    tenantId = user.TenantId
+                    tenantId = user.TenantId,
+                    permissions = AffiniSecurity.Waf.Security.WafPermissions.GetPermissionsForRole(user.Role).ToList()
                 },
                 tenant = new {
                     id = tenant.Id,

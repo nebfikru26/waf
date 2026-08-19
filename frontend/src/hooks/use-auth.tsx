@@ -39,6 +39,13 @@ export interface AuthUser {
   tenantId: string;
   planName: string;
   entitlements: Entitlements;
+  /**
+   * Named permissions granted to this user's role (see backend WafPermissions), sent by the
+   * server on login/signup/profile/impersonate so the UI can gate buttons/menus on the exact
+   * same claims the backend authorization policies enforce, rather than duplicating role-name
+   * checks that can drift out of sync with the server-side source of truth.
+   */
+  permissions: string[];
   tenant?: {
     id: string;
     name: string;
@@ -70,6 +77,8 @@ interface AuthContextType {
   refreshUser: () => Promise<void>;
   impersonateTenant: (tenantId: string) => Promise<{ error?: string }>;
   unimpersonateTenant: () => Promise<{ error?: string }>;
+  /** Whether the current user's role grants a given named permission (see WafPermissions on the backend). */
+  hasPermission: (permission: string) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -97,6 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             jobTitle: data.jobTitle,
             bio: data.bio,
             role: data.role as Role,
+            permissions: data.permissions || [],
             tenantId: data.tenantId || "",
             planName: pc?.name || "Free",
             entitlements: {
@@ -165,6 +175,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           email: data.user.email,
           name: data.user.name,
           role: data.user.role as Role,
+          permissions: data.user.permissions || [],
           tenantId: data.user.tenantId,
           planName: pc?.name || "Free",
           entitlements: {
@@ -233,6 +244,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         jobTitle: data.user.jobTitle,
         bio: data.user.bio,
         role: data.user.role as Role,
+        permissions: data.user.permissions || [],
         tenantId: data.user.tenantId,
         planName: pc?.name || "Free",
         entitlements: {
@@ -322,6 +334,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(prev => prev ? {
         ...prev,
         name: data.name || prev.name,
+        permissions: data.permissions || prev.permissions,
         planName: data.planConfig?.name || prev.planName,
         entitlements: data.planConfig ? {
           maxDomains: data.planConfig.maxDomains ?? prev.entitlements.maxDomains,
@@ -387,6 +400,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         jobTitle: data.user.jobTitle,
         bio: data.user.bio,
         role: data.user.role as Role,
+        permissions: data.user.permissions || [],
         tenantId: data.user.tenantId,
         planName: pc?.name || "Free",
         entitlements: {
@@ -455,6 +469,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Fail-closed: an unauthenticated user or a role with no matching permission entry has no
+  // permissions granted, mirroring the backend's default-deny GetPermissionsForRole behavior.
+  const hasPermission = (permission: string) => !!user?.permissions?.includes(permission);
+
   return (
     <AuthContext.Provider
       value={{
@@ -468,7 +486,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         resetPassword,
         refreshUser,
         impersonateTenant,
-        unimpersonateTenant
+        unimpersonateTenant,
+        hasPermission
       }}
     >
       {children}

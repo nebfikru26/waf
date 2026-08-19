@@ -4,6 +4,7 @@ using AffiniSecurity.Waf.Data;
 using AffiniSecurity.Waf.Models;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
+using System.Linq;
 using System.Text.Json.Serialization;
 
 namespace AffiniSecurity.Waf.Controllers
@@ -59,6 +60,7 @@ namespace AffiniSecurity.Waf.Controllers
                 jobTitle = user.JobTitle,
                 bio = user.Bio,
                 role = user.Role,
+                permissions = AffiniSecurity.Waf.Security.WafPermissions.GetPermissionsForRole(user.Role).ToList(),
                 tenantId = user.TenantId,
                 tenantName = tenant?.Name,
                 legalName = tenant?.LegalName,

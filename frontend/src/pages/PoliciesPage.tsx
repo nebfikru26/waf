@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/use-auth";
+import { WafPermissions } from "@/lib/permissions";
 import { useToast } from "@/hooks/use-toast";
 import { UpgradeOverlay } from "@/components/UpgradeOverlay";
 import CodeMirror from "@uiw/react-codemirror";
@@ -588,15 +589,18 @@ function CustomRuleBuilder({ initialRule, onSave, onCancel, token }: {
 
 // ─── Main Page ────────────────────────────────────────
 export default function PoliciesPage() {
-  const { user, isLoading: authLoading } = useAuth();
+  const { user, isLoading: authLoading, hasPermission } = useAuth();
   const { toast } = useToast();
   const qc = useQueryClient();
 
-  // General view/edit for standard rules
-  const canEdit = user?.role === "super_admin" || user?.role === "admin" || user?.role === "tenant_admin" || user?.role === "security_engineer" || user?.role === "analyst";
-
-  // Restricted management for sensitive tenant policies (per user request)
-  const canManageSecurityPolicies = user?.role === "super_admin" || user?.role === "admin" || user?.role === "tenant_admin";
+  // General view/edit for standard rules, and management of sensitive tenant policies
+  // (WAF mode, geo rules, ML detection, IP allow/block lists) — both map to the backend's
+  // firewall:edit permission (WafPermissions.FirewallEdit), which is the actual policy
+  // enforced on PUT /api/firewall/settings and the IP-rule endpoints below. Previously this
+  // was hardcoded per-role (including "analyst", which the backend does NOT grant
+  // firewall:edit to), so that role saw edit controls that would 403 on click.
+  const canEdit = hasPermission(WafPermissions.FirewallEdit);
+  const canManageSecurityPolicies = hasPermission(WafPermissions.FirewallEdit);
 
   const isPlatformAdmin = user?.role === "super_admin" || user?.role === "admin" || user?.role === "support_engineer";
   const isLocked = !isPlatformAdmin && user && !user.entitlements.hasWafDetection;

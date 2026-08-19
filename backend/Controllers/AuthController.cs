@@ -5,6 +5,7 @@ using AffiniSecurity.Waf.DTOs;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
+using System.Linq;
 using System.Security.Claims;
 using System.Text;
 using BCrypt.Net;
@@ -119,7 +120,8 @@ namespace AffiniSecurity.Waf.Controllers
                     Email = user.Email,
                     Name = user.Name,
                     Role = user.Role,
-                    TenantId = user.TenantId
+                    TenantId = user.TenantId,
+                    Permissions = AffiniSecurity.Waf.Security.WafPermissions.GetPermissionsForRole(user.Role).ToList()
                 }, 
                 Tenant = new TenantDTO {
                     Id = tenant.Id,
@@ -200,7 +202,8 @@ namespace AffiniSecurity.Waf.Controllers
                     Email = user.Email,
                     Name = user.Name,
                     Role = user.Role,
-                    TenantId = user.TenantId
+                    TenantId = user.TenantId,
+                    Permissions = AffiniSecurity.Waf.Security.WafPermissions.GetPermissionsForRole(user.Role).ToList()
                 }, 
                 Tenant = new TenantDTO {
                     Id = tenant.Id,

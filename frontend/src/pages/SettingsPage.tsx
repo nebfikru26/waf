@@ -5,6 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { useAuth } from "@/hooks/use-auth";
+import { WafPermissions } from "@/lib/permissions";
+import { Can } from "@/components/Can";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
@@ -175,22 +177,24 @@ export default function SettingsPage() {
               </div>
             )}
 
-            <div className="flex items-center gap-2 mb-4">
-              <Input 
-                placeholder="e.g. Terraform Production Key" 
-                value={newKeyName} 
-                onChange={(e) => setNewKeyName(e.target.value)}
-                className="bg-muted/50 font-mono text-xs" 
-              />
-              <Button 
-                size="sm" 
-                className="shrink-0 text-xs"
-                disabled={!newKeyName.trim() || generateKeyMutation.isPending}
-                onClick={() => generateKeyMutation.mutate(newKeyName)}
-              >
-                {generateKeyMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Plus className="h-4 w-4 mr-2" /> Generate Key</>}
-              </Button>
-            </div>
+            <Can permission={WafPermissions.ApiKeysManage}>
+              <div className="flex items-center gap-2 mb-4">
+                <Input 
+                  placeholder="e.g. Terraform Production Key" 
+                  value={newKeyName} 
+                  onChange={(e) => setNewKeyName(e.target.value)}
+                  className="bg-muted/50 font-mono text-xs" 
+                />
+                <Button 
+                  size="sm" 
+                  className="shrink-0 text-xs"
+                  disabled={!newKeyName.trim() || generateKeyMutation.isPending}
+                  onClick={() => generateKeyMutation.mutate(newKeyName)}
+                >
+                  {generateKeyMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Plus className="h-4 w-4 mr-2" /> Generate Key</>}
+                </Button>
+              </div>
+            </Can>
 
             <div className="space-y-2">
               {isLoadingKeys ? (
@@ -214,15 +218,17 @@ export default function SettingsPage() {
                         {key.lastUsedAt ? `Last used ${new Date(key.lastUsedAt).toLocaleDateString()}` : "Never used"}
                       </span>
                       {!key.isRevoked && (
-                        <Button 
-                          size="icon" 
-                          variant="ghost" 
-                          className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                          onClick={() => revokeKeyMutation.mutate(key.id)}
-                          disabled={revokeKeyMutation.isPending}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
+                        <Can permission={WafPermissions.ApiKeysManage}>
+                          <Button 
+                            size="icon" 
+                            variant="ghost" 
+                            className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => revokeKeyMutation.mutate(key.id)}
+                            disabled={revokeKeyMutation.isPending}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </Can>
                       )}
                     </div>
                   </div>

@@ -8,6 +8,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { useAuth } from "@/hooks/use-auth";
+import { WafPermissions } from "@/lib/permissions";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -109,13 +110,16 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 export default function UsersPage() {
-  const { user, isLoading: isAuthLoading, impersonateTenant } = useAuth();
+  const { user, isLoading: isAuthLoading, impersonateTenant, hasPermission } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const isPlatformAdmin = user?.role === "super_admin" || user?.role === "support_engineer" || user?.role === "admin";
   const isTenantAdmin = user?.role === "tenant_admin";
-  const isAdmin = isPlatformAdmin || isTenantAdmin;
+  // Mirrors the backend's users:manage permission (RequireUserAdministrator policy), which is
+  // exactly the super_admin/admin/support_engineer/tenant_admin set already computed above —
+  // driven from hasPermission so it stays correct if the role -> permission map ever changes.
+  const isAdmin = hasPermission(WafPermissions.UsersManage);
   const isCurrentUserSuperAdmin = user?.role === "super_admin";
 
   const [activeTab, setActiveTab] = useState<TabType>(isPlatformAdmin ? "system" : "clients");
