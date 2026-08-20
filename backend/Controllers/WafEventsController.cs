@@ -55,11 +55,10 @@ namespace AffiniSecurity.Waf.Controllers
             using var reader = new System.IO.StreamReader(request.Body);
             var bodyText = await reader.ReadToEndAsync();
 
-            var secret = System.Environment.GetEnvironmentVariable("SIDECAR_SIGNING_SECRET");
-            if (string.IsNullOrEmpty(secret))
-            {
-                secret = "fallback_sidecar_secret_2026";
-            }
+            // No fallback: Program.cs fails the app at startup if this is unset/weak, so it is
+            // guaranteed to be a strong secret here. A fallback would let anyone forge signed
+            // WAF events whenever the env var is misconfigured — that was the original bug.
+            var secret = System.Environment.GetEnvironmentVariable("SIDECAR_SIGNING_SECRET")!;
 
             var message = $"{timestamp}.{bodyText}";
             using (var hmac = new System.Security.Cryptography.HMACSHA256(System.Text.Encoding.UTF8.GetBytes(secret)))

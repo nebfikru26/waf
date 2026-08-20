@@ -150,7 +150,13 @@ if (string.IsNullOrWhiteSpace(challengeSecretCheck) || challengeSecretCheck.Leng
     throw new InvalidOperationException(
         "[Security] Waf:ChallengeSecret is missing or too short (< 32 chars). " +
         "Set a strong secret via the CHALLENGE_SECRET environment variable. Application will not start.");
-Console.WriteLine("[Security] Secret validation passed — JWT and Challenge secrets are present and adequately sized.");
+var sidecarSecretCheck = Environment.GetEnvironmentVariable("SIDECAR_SIGNING_SECRET");
+if (string.IsNullOrWhiteSpace(sidecarSecretCheck) || sidecarSecretCheck.Length < 32)
+    throw new InvalidOperationException(
+        "[Security] SIDECAR_SIGNING_SECRET is missing or too short (< 32 chars). " +
+        "This secret authenticates AI-sidecar-reported WAF events (see WafEventsController) and must " +
+        "match the value the ai-inference-sidecar is configured with. Application will not start.");
+Console.WriteLine("[Security] Secret validation passed — JWT, Challenge, and Sidecar-signing secrets are present and adequately sized.");
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Initialize Database
