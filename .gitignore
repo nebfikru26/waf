@@ -13,6 +13,11 @@ backend/nginx/ssl/*.pem
 backend/nginx/logs/
 backend/nginx/reload.signal
 
+# GeoIP country database (operational artifact, not source) — provision via Docker build
+# step or mounted volume from a licensed/CC-BY source (DB-IP Lite or MaxMind GeoLite2),
+# refreshed on that database's own release cadence. See backend/Services/GeoIpService.cs.
+backend/geoip/*.mmdb
+
 # Design docs / working documents — not source, kept local only
 *.docx
 # .NET (Backend)

@@ -1,7 +1,10 @@
 using System.Net;
 using System.Threading.RateLimiting;
+using AffiniSecurity.Waf.Data;
+using AffiniSecurity.Waf.Models;
 using AffiniSecurity.Waf.Services;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 
@@ -12,6 +15,7 @@ namespace AffiniSecurity.Waf.Middleware
         private readonly RequestDelegate _next;
         private readonly IRedisService _redis;
         private readonly ILogger<DistributedRateLimiterMiddleware> _logger;
+        private readonly IServiceScopeFactory _scopeFactory;
 
         // Configuration (Ideally moved to a settings service)
         private const int MaxRequestsPerMinute = 120;
@@ -34,11 +38,12 @@ namespace AffiniSecurity.Waf.Middleware
                     AutoReplenishment = true
                 }));
 
-        public DistributedRateLimiterMiddleware(RequestDelegate next, IRedisService redis, ILogger<DistributedRateLimiterMiddleware> logger)
+        public DistributedRateLimiterMiddleware(RequestDelegate next, IRedisService redis, ILogger<DistributedRateLimiterMiddleware> logger, IServiceScopeFactory scopeFactory)
         {
             _next = next;
             _redis = redis;
             _logger = logger;
+            _scopeFactory = scopeFactory;
         }
 
         public async Task InvokeAsync(HttpContext context)
@@ -85,7 +90,7 @@ namespace AffiniSecurity.Waf.Middleware
                 if (count > MaxRequestsPerMinute)
                 {
                     _logger.LogWarning($"[RateLimit] Blocked {clientIp} for Tenant {tenantId}. Count: {count}");
-                    await RejectAsync(context);
+                    await RejectAsync(context, clientIp, tenantId, (int)count);
                     return;
                 }
             }
@@ -112,11 +117,11 @@ namespace AffiniSecurity.Waf.Middleware
             }
 
             _logger.LogWarning($"[RateLimit:Fallback] Blocked {clientIp} for Tenant {tenantId} via in-process limiter (Redis unavailable).");
-            await RejectAsync(context);
+            await RejectAsync(context, clientIp, tenantId, MaxRequestsPerMinute + 1);
             return false;
         }
 
-        private async Task RejectAsync(HttpContext context)
+        private async Task RejectAsync(HttpContext context, string clientIp, string tenantId, int observedCount)
         {
             context.Response.StatusCode = (int)HttpStatusCode.TooManyRequests;
             context.Response.Headers["Retry-After"] = BlockingDurationSeconds.ToString();
@@ -126,6 +131,38 @@ namespace AffiniSecurity.Waf.Middleware
                 message = "You have exceeded the global rate limit for this service.",
                 retry_after = BlockingDurationSeconds
             });
+
+            // Persist the violation as a real, queryable security event so rate-limit analytics
+            // and incident response have genuine historical data instead of nothing at all.
+            // Fire-and-forget on its own scope so a slow/unavailable DB never delays the 429 response.
+            _ = PersistViolationAsync(clientIp, tenantId, context.Request.Path + context.Request.QueryString, observedCount);
+        }
+
+        private async Task PersistViolationAsync(string clientIp, string tenantId, string uri, int observedCount)
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<WafDbContext>();
+                db.AlertLogs.Add(new AlertLog
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    TenantId = tenantId,
+                    Ip = clientIp,
+                    RuleId = "RATE-LIMIT",
+                    Rule = "RATE_LIMIT_EXCEEDED",
+                    Uri = uri,
+                    Timestamp = DateTime.UtcNow.ToString("O"),
+                    Severity = observedCount > MaxRequestsPerMinute * 2 ? "HIGH" : "MEDIUM",
+                    Action = "blocked",
+                    RawData = $"count={observedCount};limit={MaxRequestsPerMinute}/{BlockingDurationSeconds}s"
+                });
+                await db.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to persist rate-limit violation record for {Ip}/{Tenant}", clientIp, tenantId);
+            }
         }
     }
 }

@@ -36,6 +36,7 @@ builder.Services.AddSingleton<WafConfigGenerator>();
 builder.Services.AddSingleton<IClickHouseService, ClickHouseService>();
 builder.Services.AddScoped<IAuditService, ImmutableAuditService>();
 builder.Services.AddSingleton<IK8sCertManagerService, K8sCertManagerService>();
+builder.Services.AddSingleton<IGeoIpService, GeoIpService>();
 builder.Services.AddHostedService<CertbotBackgroundService>();
 builder.Services.AddHostedService<NatsLogIngester>();
 builder.Services.AddHostedService<AiHealthMonitorService>();

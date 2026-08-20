@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using AffiniSecurity.Waf.Data;
+using AffiniSecurity.Waf.Models;
+using AffiniSecurity.Waf.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace AffiniSecurity.Waf.Controllers
@@ -11,10 +13,47 @@ namespace AffiniSecurity.Waf.Controllers
     public class AnalyticsController : ControllerBase
     {
         private readonly WafDbContext _context;
+        private readonly IGeoIpService _geoIp;
+        private readonly IClickHouseService _clickHouse;
 
-        public AnalyticsController(WafDbContext context)
+        public AnalyticsController(WafDbContext context, IGeoIpService geoIp, IClickHouseService clickHouse)
         {
             _context = context;
+            _geoIp = geoIp;
+            _clickHouse = clickHouse;
+        }
+
+        private class CountryStat
+        {
+            public string country { get; set; } = "";
+            public string code { get; set; } = "";
+            public int requests { get; set; }
+            public int blocked { get; set; }
+        }
+
+        /// <summary>
+        /// Groups a set of alert logs by resolved country using the local GeoIP database.
+        /// Returns an empty list (never fabricated countries) when no GeoIP database is
+        /// provisioned (IGeoIpService.IsAvailable == false) or no alerts resolve to a country.
+        /// </summary>
+        private List<CountryStat> GroupByCountry(IEnumerable<AlertLog> alerts)
+        {
+            if (!_geoIp.IsAvailable) return new List<CountryStat>();
+
+            return alerts
+                .Select(a => new { a.Ip, a.Action, Geo = _geoIp.Lookup(a.Ip) })
+                .Where(x => x.Geo != null)
+                .GroupBy(x => new { x.Geo!.CountryCode, x.Geo.CountryName })
+                .Select(g => new CountryStat
+                {
+                    country = g.Key.CountryName,
+                    code = g.Key.CountryCode,
+                    requests = g.Count(),
+                    blocked = g.Count(x => x.Action == "blocked" || x.Action == "BLOCK")
+                })
+                .OrderByDescending(g => g.requests)
+                .Take(10)
+                .ToList();
         }
 
         // ============================================================
@@ -76,34 +115,46 @@ namespace AffiniSecurity.Waf.Controllers
             var query = _context.AlertLogs.AsQueryable();
             if (isAdmin) query = query.IgnoreQueryFilters();
 
-            var topIps = await query
+            var grouped = await query
                 .GroupBy(a => a.Ip)
                 .Select(g => new {
                     ip = g.Key,
                     requests = g.Count(),
-                    blocked = g.Count(x => x.Action == "blocked" || x.Action == "BLOCK"),
-                    country = "ET"
+                    blocked = g.Count(x => x.Action == "blocked" || x.Action == "BLOCK")
                 })
                 .OrderByDescending(g => g.requests)
                 .Take(10)
                 .ToListAsync();
 
+            // Country is resolved via the local GeoIP database when provisioned; honestly
+            // reported as null (not a fabricated default) when unavailable.
+            var topIps = grouped.Select(g => new
+            {
+                g.ip,
+                g.requests,
+                g.blocked,
+                country = _geoIp.Lookup(g.ip)?.CountryCode
+            });
+
             return Ok(topIps);
         }
 
         // ============================================================
-        // Country breakdown
+        // Country breakdown — real aggregation of alert-log source IPs,
+        // resolved via the local GeoIP database (see GeoIpService). Returns an
+        // empty list (frontend already renders a "No geographic data yet" empty
+        // state) instead of fabricated countries when no GeoIP database is
+        // provisioned or no traffic has been recorded yet.
         // ============================================================
         [HttpGet("countries")]
-        public IActionResult GetCountries()
+        public async Task<IActionResult> GetCountries()
         {
-            return Ok(new[] {
-                new { country = "Ethiopia", code = "ET", requests = 58000, blocked = 1200 },
-                new { country = "United States", code = "US", requests = 12000, blocked = 800 },
-                new { country = "Germany", code = "DE", requests = 6000, blocked = 150 },
-                new { country = "Russia", code = "RU", requests = 3500, blocked = 1900 },
-                new { country = "China", code = "CN", requests = 2800, blocked = 2100 },
-            });
+            var isAdmin = User.IsInRole("admin") || User.IsInRole("super_admin") || User.IsInRole("support_engineer");
+            var query = _context.AlertLogs.AsQueryable();
+            if (isAdmin) query = query.IgnoreQueryFilters();
+
+            var alerts = await query.Select(a => new AlertLog { Ip = a.Ip, Action = a.Action }).ToListAsync();
+            return Ok(GroupByCountry(alerts));
         }
 
         // ============================================================
@@ -151,123 +202,207 @@ namespace AffiniSecurity.Waf.Controllers
         }
 
         // ============================================================
-        // Traffic overview (simulated with regional data)
+        // Traffic overview — TotalRequests is real (ClickHouse network_metadata,
+        // populated by TrafficLoggerMiddleware on every request). RegionalData is
+        // real GeoIP-resolved country breakdown of alert-log IPs. StatusCounts and
+        // MethodDistribution are NOT tracked anywhere in the current telemetry
+        // pipeline (no per-request method/status capture exists), so they are
+        // honestly returned empty rather than fabricated — building them would
+        // require adding method/status capture to TrafficLoggerMiddleware first.
         // ============================================================
         [HttpGet("traffic")]
-        public IActionResult GetTrafficAnalysis()
+        public async Task<IActionResult> GetTrafficAnalysis()
         {
+            var isAdmin = User.IsInRole("admin") || User.IsInRole("super_admin") || User.IsInRole("support_engineer");
+            var query = _context.AlertLogs.AsQueryable();
+            if (isAdmin) query = query.IgnoreQueryFilters();
+
+            var totalRequests = await _clickHouse.GetTotalRequestsAsync();
+            var alerts = await query.Select(a => new AlertLog { Ip = a.Ip, Action = a.Action }).ToListAsync();
+            var regional = GroupByCountry(alerts)
+                .Select(x => new { region = x.country, count = x.requests })
+                .ToArray();
+
             return Ok(new
             {
-                TotalRequests = 125430,
-                StatusCounts = new[] {
-                    new { label = "2xx", value = 110000 },
-                    new { label = "3xx", value = 5000 },
-                    new { label = "4xx", value = 8000 },
-                    new { label = "5xx", value = 2430 }
-                },
-                MethodDistribution = new[] {
-                    new { label = "GET", value = 85 },
-                    new { label = "POST", value = 12 },
-                    new { label = "PUT", value = 2 },
-                    new { label = "DELETE", value = 1 }
-                },
-                RegionalData = new[] {
-                    new { region = "Ethiopia (Ethio Telecom)", count = 45000 },
-                    new { region = "Ethiopia (Safaricom)", count = 12000 },
-                    new { region = "United States", count = 8000 },
-                    new { region = "Europe", count = 15000 },
-                    new { region = "Rest of Africa", count = 25000 }
-                }
+                TotalRequests = totalRequests,
+                StatusCounts = Array.Empty<object>(),
+                MethodDistribution = Array.Empty<object>(),
+                RegionalData = regional
             });
         }
 
         // ============================================================
-        // Risk scoring
+        // Risk scoring — Score/Rating are real (existing alert-volume heuristic).
+        // Trends is now a real hourly bucketing of alert-log timestamps over the
+        // last 24 hours. TopThreats is the real top-3 matched rule names, reusing
+        // the same GroupBy(Rule) pattern as the "attacks" endpoint above.
         // ============================================================
         [HttpGet("risk")]
         public async Task<IActionResult> GetAttackLikelihood()
         {
-            var alertCount = await _context.AlertLogs.CountAsync();
+            var isAdmin = User.IsInRole("admin") || User.IsInRole("super_admin") || User.IsInRole("support_engineer");
+            var query = _context.AlertLogs.AsQueryable();
+            if (isAdmin) query = query.IgnoreQueryFilters();
+
+            var alertCount = await query.CountAsync();
             var likelihood = Math.Min(100, (alertCount / 10.0) + 15);
+
+            var recentAlerts = await query
+                .Select(a => new { a.Timestamp, a.Rule })
+                .ToListAsync();
+
+            var now = DateTime.UtcNow;
+            var trends = Enumerable.Range(0, 6)
+                .Select(i => now.AddHours(-(5 - i) * 4))
+                .Select(bucketStart => new
+                {
+                    time = bucketStart.ToString("HH:00"),
+                    risk = recentAlerts.Count(a =>
+                        DateTime.TryParse(a.Timestamp, out var t) &&
+                        t >= bucketStart && t < bucketStart.AddHours(4))
+                })
+                .ToArray();
+
+            var topThreats = recentAlerts
+                .Where(a => !string.IsNullOrEmpty(a.Rule))
+                .GroupBy(a => a.Rule)
+                .OrderByDescending(g => g.Count())
+                .Take(3)
+                .Select(g => g.Key)
+                .ToArray();
 
             return Ok(new
             {
                 Score = likelihood,
                 Rating = likelihood > 75 ? "Critical" : likelihood > 40 ? "Elevated" : "Normal",
-                Trends = new[] {
-                    new { time = "00:00", risk = 12 },
-                    new { time = "04:00", risk = 15 },
-                    new { time = "08:00", risk = 45 },
-                    new { time = "12:00", risk = 38 },
-                    new { time = "16:00", risk = 62 },
-                    new { time = "20:00", risk = 25 }
-                },
-                TopThreats = new[] { "SQL Injection Attempts", "Path Traversal", "WordPress Probe" }
+                Trends = trends,
+                TopThreats = topThreats
             });
         }
 
         // ============================================================
-        // Bot analysis
+        // Bot analysis — heuristic based on real alert-log rule matches whose
+        // name mentions bot/crawler/scanner/automation activity (the only
+        // automation signal currently captured; no User-Agent field exists in
+        // the schema for true bot fingerprinting). Honestly returns zeros when
+        // there is no alert data at all, rather than a fabricated split.
         // ============================================================
         [HttpGet("bots")]
-        public IActionResult GetBotAnalysis()
+        public async Task<IActionResult> GetBotAnalysis()
         {
+            var isAdmin = User.IsInRole("admin") || User.IsInRole("super_admin") || User.IsInRole("support_engineer");
+            var query = _context.AlertLogs.AsQueryable();
+            if (isAdmin) query = query.IgnoreQueryFilters();
+
+            var alerts = await query.Select(a => new { a.Rule, a.Action }).ToListAsync();
+            var total = alerts.Count;
+
+            bool IsBotRelated(string? rule) => rule != null &&
+                (rule.Contains("bot", StringComparison.OrdinalIgnoreCase) ||
+                 rule.Contains("crawler", StringComparison.OrdinalIgnoreCase) ||
+                 rule.Contains("scanner", StringComparison.OrdinalIgnoreCase) ||
+                 rule.Contains("automation", StringComparison.OrdinalIgnoreCase));
+
+            var botAlerts = alerts.Where(a => IsBotRelated(a.Rule)).ToList();
+            var botPercentage = total > 0 ? Math.Round(botAlerts.Count * 100.0 / total, 1) : 0.0;
+
+            var topBots = botAlerts
+                .GroupBy(a => a.Rule)
+                .OrderByDescending(g => g.Count())
+                .Take(5)
+                .Select(g => new { name = g.Key, action = g.First().Action })
+                .ToArray();
+
             return Ok(new
             {
-                BotPercentage = 35.5,
-                HumanPercentage = 64.5,
-                BotTypes = new[] {
-                    new { type = "Search Engines", value = 40 },
-                    new { type = "Malicious Scanners", value = 35 },
-                    new { type = "Aggregators", value = 15 },
-                    new { type = "Social Media", value = 10 }
-                },
-                TopBots = new[] {
-                    new { name = "Googlebot", action = "Allow" },
-                    new { name = "Bingbot", action = "Allow" },
-                    new { name = "Go-http-client", action = "Block" },
-                    new { name = "Python-urllib", action = "Challenge" }
-                }
+                BotPercentage = botPercentage,
+                HumanPercentage = total > 0 ? Math.Round(100.0 - botPercentage, 1) : 0.0,
+                BotTypes = Array.Empty<object>(), // no traffic classification data source exists
+                TopBots = topBots
             });
         }
 
         // ============================================================
-        // Rate limit analysis
+        // Rate limit analysis — real, backed by AlertLog rows persisted by
+        // DistributedRateLimiterMiddleware (Rule = "RATE_LIMIT_EXCEEDED") whenever
+        // it blocks a request. PeakRps is intentionally omitted: no per-second
+        // request-rate telemetry is captured anywhere in the pipeline, and
+        // extrapolating one from event counts would just be a new fabrication.
         // ============================================================
         [HttpGet("rate-limit")]
-        public IActionResult GetRateLimitAnalysis()
+        public async Task<IActionResult> GetRateLimitAnalysis()
         {
+            var isAdmin = User.IsInRole("admin") || User.IsInRole("super_admin") || User.IsInRole("support_engineer");
+            var query = _context.AlertLogs.Where(a => a.Rule == "RATE_LIMIT_EXCEEDED");
+            if (isAdmin) query = (IQueryable<AlertLog>)query.IgnoreQueryFilters();
+
+            var violations = await query.ToListAsync();
+
+            var violators = violations
+                .GroupBy(v => v.Ip)
+                .Select(g => new
+                {
+                    ip = g.Key,
+                    requests = g.Count(),
+                    status = g.Any(v => v.Severity == "HIGH") ? "Blocked" : "Challenged"
+                })
+                .OrderByDescending(v => v.requests)
+                .Take(10)
+                .ToArray();
+
             return Ok(new
             {
-                BurstEvents = 12,
-                ActiveBlocks = 45,
-                PeakRps = 850,
-                Violators = new[] {
-                    new { ip = "196.188.1.12", requests = 4500, status = "Blocked" },
-                    new { ip = "197.156.45.2", requests = 2100, status = "Challenged" },
-                    new { ip = "5.45.12.8", requests = 1800, status = "Blocked" }
-                }
+                BurstEvents = violations.Count,
+                ActiveBlocks = violations.Select(v => v.Ip).Distinct().Count(),
+                Violators = violators
             });
         }
 
         // ============================================================
-        // ATO analysis
+        // ATO (account takeover) analysis — real aggregation of alert logs whose
+        // URI targets authentication endpoints (same signal already used by the
+        // "stats" endpoint's atoAttempts field).
         // ============================================================
         [HttpGet("ato")]
-        public IActionResult GetAccountTakeoverAnalysis()
+        public async Task<IActionResult> GetAccountTakeoverAnalysis()
         {
+            var isAdmin = User.IsInRole("admin") || User.IsInRole("super_admin") || User.IsInRole("support_engineer");
+            var query = _context.AlertLogs.Where(a => a.Uri != null && a.Uri.Contains("/auth/login"));
+            if (isAdmin) query = (IQueryable<AlertLog>)query.IgnoreQueryFilters();
+
+            var authAlerts = await query.ToListAsync();
+            var uniqueAttempts = authAlerts.Select(a => a.Ip).Distinct().Count();
+            var failedLogins = authAlerts.Count;
+
+            var affectedEndpoints = authAlerts.Select(a => a.Uri).Distinct().Take(10).ToArray();
+
+            var now = DateTime.UtcNow;
+            var timeline = Enumerable.Range(1, 4)
+                .Select(hoursAgo => new
+                {
+                    hour = $"{hoursAgo}h ago",
+                    count = authAlerts.Count(a =>
+                        DateTime.TryParse(a.Timestamp, out var t) &&
+                        t >= now.AddHours(-hoursAgo) && t < now.AddHours(-(hoursAgo - 1)))
+                })
+                .ToArray();
+
+            // Simple, transparent heuristic: many unique IPs each attempting logins is the
+            // signature of credential stuffing (as opposed to a few IPs brute-forcing one
+            // account). Ratio-based, not a magic constant.
+            var likelihood = uniqueAttempts == 0 ? "None"
+                : (double)uniqueAttempts / Math.Max(failedLogins, 1) > 0.6 ? "High"
+                : uniqueAttempts > 20 ? "Elevated"
+                : "Low";
+
             return Ok(new
             {
-                CredentialStuffingLikelihood = "Low",
-                FailedLogins = 124,
-                UniqueUserAttempts = 45,
-                AffectedEndpoints = new[] { "/api/auth/login", "/api/profile/update" },
-                BruteForceTimeline = new[] {
-                    new { hour = "1h ago", count = 5 },
-                    new { hour = "2h ago", count = 12 },
-                    new { hour = "3h ago", count = 85 },
-                    new { hour = "4h ago", count = 10 }
-                }
+                CredentialStuffingLikelihood = likelihood,
+                FailedLogins = failedLogins,
+                UniqueUserAttempts = uniqueAttempts,
+                AffectedEndpoints = affectedEndpoints,
+                BruteForceTimeline = timeline
             });
         }
     }
