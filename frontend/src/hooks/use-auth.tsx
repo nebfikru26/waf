@@ -153,63 +153,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (email: string, password: string, rememberMe: boolean = false) => {
     try {
-      if (password === "bypass") {
-        console.log(`[Auth] Bypass login requested for ${email}, performing real authentication with administrative credentials.`);
-        const response = await fetch("/api/auth/login", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ email: "admin@affinisecurity.io", password: "Password123!" }),
-        });
-
-        if (!response.ok) {
-          console.error("[Auth] Bypass real authentication failed.");
-          return { error: "Development bypass failed: Admin credentials invalid." };
-        }
-
-        const data = await response.json();
-
-        const pc = data.planConfig || data.plan;
-        setUser({
-          id: data.user.id,
-          email: data.user.email,
-          name: data.user.name,
-          role: data.user.role as Role,
-          permissions: data.user.permissions || [],
-          tenantId: data.user.tenantId,
-          planName: pc?.name || "Free",
-          entitlements: {
-            maxDomains: pc?.maxDomains || 100,
-            hasWafDetection: pc?.hasWafDetection ?? true,
-            hasWafBlocking: pc?.hasWafBlocking ?? true,
-            hasApiProtection: pc?.hasApiProtection ?? true,
-            hasBotProtection: pc?.hasBotProtection ?? true,
-            hasDdosProtection: pc?.hasDdosProtection ?? true,
-            hasAccountTakeover: pc?.hasAccountTakeover ?? true,
-            hasRateLimiting: pc?.hasRateLimiting ?? true,
-            hasSslManagement: pc?.hasSslManagement ?? true,
-            hasThreatIntel: pc?.hasThreatIntel ?? true,
-            hasAttackLogs: pc?.hasAttackLogs ?? true,
-            hasNotifications: pc?.hasNotifications ?? true,
-            hasAnalytics: pc?.hasAnalytics ?? true,
-          },
-          tenant: {
-            id: data.user.tenantId,
-            name: data.tenant?.name || "System Organization",
-            domain: data.tenant?.domain || "",
-            contactPhone: data.tenant?.contactPhone || "",
-            contactEmail: data.tenant?.contactEmail || "",
-            isProfileComplete: data.tenant?.isProfileComplete ?? true,
-            onboardingStep: data.tenant?.onboardingStep ?? 5,
-            legalName: data.tenant?.legalName,
-            tinNo: data.tenant?.tinNo,
-            licenseNo: data.tenant?.licenseNo,
-            category: data.tenant?.category
-          }
-        });
-        return {};
-      }
-
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
