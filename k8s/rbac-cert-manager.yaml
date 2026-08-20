@@ -1,0 +1,33 @@
+# Grants the api-dotnet pods least-privilege access to manage cert-manager Certificate custom
+# resources for per-tenant custom domain SSL provisioning (see
+# backend/Services/K8sCertManagerService.cs and CertbotBackgroundService.cs). Scoped to a single
+# namespace and a single resource type — the API pods do not need any other cluster permissions.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: api-dotnet
+  namespace: affinisecurity-waf
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cert-manager-certificate-manager
+  namespace: affinisecurity-waf
+rules:
+- apiGroups: ["cert-manager.io"]
+  resources: ["certificates"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: api-dotnet-cert-manager-binding
+  namespace: affinisecurity-waf
+subjects:
+- kind: ServiceAccount
+  name: api-dotnet
+  namespace: affinisecurity-waf
+roleRef:
+  kind: Role
+  name: cert-manager-certificate-manager
+  apiGroup: rbac.authorization.k8s.io

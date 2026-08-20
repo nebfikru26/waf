@@ -57,6 +57,7 @@ spec:
       labels:
         app: api-dotnet
     spec:
+      serviceAccountName: api-dotnet
       containers:
       - name: api
         image: affinisecurity/waf-api:latest

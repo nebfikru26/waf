@@ -589,6 +589,10 @@ export default function DomainsPage() {
   const [provisioningId, setProvisioningId] = useState<string | null>(null);
   const [domainToDelete, setDomainToDelete] = useState<Domain | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  // Domains with a certificate requested but not yet issued (real ACME issuance is async —
+  // this reflects the honest "pending" status returned by the backend rather than assuming
+  // instant success).
+  const [sslPendingIds, setSslPendingIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!user) return;
@@ -603,6 +607,29 @@ export default function DomainsPage() {
       setSearchParams(p, { replace: true });
     }
   }, [searchParams]);
+
+  // Poll while any domain has a certificate request in flight, since real ACME issuance
+  // completes asynchronously in the background (CertbotBackgroundService reconciliation loop).
+  useEffect(() => {
+    if (sslPendingIds.size === 0) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch("/api/domains", { headers: {} });
+        if (!res.ok) return;
+        const data: Domain[] = await res.json();
+        if (!Array.isArray(data)) return;
+        setDomainsList(data);
+        setSslPendingIds(prev => {
+          const next = new Set(prev);
+          for (const d of data) {
+            if (d.ssl_provisioned) next.delete(d.id);
+          }
+          return next;
+        });
+      } catch { /* ignore transient poll errors */ }
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [sslPendingIds]);
 
   const loadDomains = async () => {
     setLoading(true);
@@ -629,12 +656,14 @@ export default function DomainsPage() {
         method: "PATCH",
         headers: {}
       });
+      const body = await res.json();
       if (res.ok) {
-        setDomainsList(prev => prev.map(d => d.id === id ? { ...d, dns_verified: true, status: "active" } : d));
+        // Reflect the real domain returned by the backend (a genuine DNS lookup), not an
+        // assumed success.
+        setDomainsList(prev => prev.map(d => d.id === id ? { ...d, dns_verified: body.dns_verified, status: body.status } : d));
         toast({ title: "DNS Verified ✓", description: "Traffic will now route through the WAF proxy" });
       } else {
-        const e = await res.json();
-        toast({ title: "Verification failed", description: e.error, variant: "destructive" });
+        toast({ title: "Verification failed", description: body.error, variant: "destructive" });
       }
     } catch {
       toast({ title: "Network error", variant: "destructive" });
@@ -670,12 +699,19 @@ export default function DomainsPage() {
         method: "PATCH",
         headers: {}
       });
+      const body = await res.json();
       if (res.ok) {
-        setDomainsList(prev => prev.map(d => d.id === id ? { ...d, ssl_provisioned: true } : d));
-        toast({ title: "SSL Provisioned ✓", description: "TLS certificate issued and activated" });
+        if (body.status === "active") {
+          setDomainsList(prev => prev.map(d => d.id === id ? { ...d, ssl_provisioned: true } : d));
+          setSslPendingIds(prev => { const next = new Set(prev); next.delete(id); return next; });
+          toast({ title: "SSL Already Active", description: "This domain already has an active certificate." });
+        } else {
+          // Real ACME issuance is asynchronous — do NOT mark ssl_provisioned true yet.
+          setSslPendingIds(prev => new Set(prev).add(id));
+          toast({ title: "SSL Requested", description: body.message ?? "Certificate issuance in progress via Let's Encrypt. This can take a few minutes." });
+        }
       } else {
-        const e = await res.json();
-        toast({ title: "Provisioning failed", description: e.error, variant: "destructive" });
+        toast({ title: "Provisioning failed", description: body.error, variant: "destructive" });
       }
     } catch {
       toast({ title: "Network error", variant: "destructive" });
@@ -808,6 +844,11 @@ export default function DomainsPage() {
                     )}
 
                     {!domain.ssl_provisioned ? (
+                      sslPendingIds.has(domain.id) ? (
+                        <span className="text-[10px] font-mono text-amber-400 flex items-center gap-1 bg-amber-500/10 border border-amber-500/30 px-2 py-1 rounded">
+                          <Loader2 className="h-2.5 w-2.5 animate-spin" /> SSL PENDING
+                        </span>
+                      ) : (
                       <Button size="sm" variant="outline" className="text-[10px] h-7 font-mono px-3"
                         disabled={provisioningId === domain.id || !domain.dns_verified}
                         onClick={() => provisionSsl(domain.id)}
@@ -817,6 +858,7 @@ export default function DomainsPage() {
                           : <Shield className="h-3 w-3 mr-1" />}
                         Provision SSL
                       </Button>
+                      )
                     ) : (
                       <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/30 px-2 py-1 rounded">
                         <Lock className="h-2.5 w-2.5" /> SSL ACTIVE
