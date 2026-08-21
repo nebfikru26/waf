@@ -128,7 +128,7 @@ export function CompanyOnboarding() {
 
       // 2. Apply Security Template if selected
       if (formData.templateId && user?.tenant?.id) {
-        await fetch(`/api/admin/templates/${formData.templateId}/apply/${user.tenant.id}`, {
+        await fetch(`/api/templates/${formData.templateId}/apply/${user.tenant.id}`, {
           method: "POST",
           headers,
         });

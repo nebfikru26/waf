@@ -71,7 +71,7 @@ export default function AnalyticsPage() {
     queryKey: ["analytics-summary", timeRange],
     queryFn: () => fetch(`/api/analytics/summary?range=${timeRange}`, { headers }).then(r => r.json()),
     refetchInterval: 60_000,
-    enabled: !authLoading && !!token,
+    enabled: !authLoading,
   });
 
   // ── Live SSE for CRS ───────────────────────────────────────────────────────
@@ -108,19 +108,19 @@ export default function AnalyticsPage() {
   const { data: topIPs = [] } = useQuery<TopIP[]>({
     queryKey: ["analytics-ips"],
     queryFn: () => fetch("/api/analytics/ips", { headers }).then(r => r.json()),
-    enabled: !authLoading && !!token,
+    enabled: !authLoading,
   });
 
   const { data: countries = [] } = useQuery<CountryData[]>({
     queryKey: ["analytics-countries"],
     queryFn: () => fetch("/api/analytics/countries", { headers }).then(r => r.json()),
-    enabled: !authLoading && !!token,
+    enabled: !authLoading,
   });
 
   const { data: attacks = [] } = useQuery<AttackType[]>({
     queryKey: ["analytics-attacks"],
     queryFn: () => fetch("/api/analytics/attacks", { headers }).then(r => r.json()),
-    enabled: !authLoading && !!token,
+    enabled: !authLoading,
   });
 
   const safeTopIPs = Array.isArray(topIPs) ? topIPs : [];

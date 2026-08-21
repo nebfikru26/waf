@@ -439,12 +439,12 @@ export default function APIProtectionPage() {
                       {/* Feature indicators */}
                       <div className="flex gap-1">
                         {ep.authRequired
-                          ? <Key className="h-3 w-3 text-primary" title="Auth required" />
-                          : <Key className="h-3 w-3 text-muted-foreground/30" title="No auth" />
+                          ? <span title="Auth required"><Key className="h-3 w-3 text-primary" /></span>
+                          : <span title="No auth"><Key className="h-3 w-3 text-muted-foreground/30" /></span>
                         }
                         {hasSchema
-                          ? <CheckCircle2 className="h-3 w-3 text-emerald-400" title="Schema validated" />
-                          : <XCircle className="h-3 w-3 text-muted-foreground/30" title="No schema" />
+                          ? <span title="Schema validated"><CheckCircle2 className="h-3 w-3 text-emerald-400" /></span>
+                          : <span title="No schema"><XCircle className="h-3 w-3 text-muted-foreground/30" /></span>
                         }
                         {ep.max_body_kb > 0 && (
                           <span className="text-[9px] font-mono text-muted-foreground">{ep.max_body_kb}KB</span>

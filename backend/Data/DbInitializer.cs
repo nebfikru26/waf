@@ -191,6 +191,44 @@ namespace AffiniSecurity.Waf.Data
                 );
             "); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Governance tables creation failed: {ex.Message}"); }
 
+            // ATO tracker (global login/signup brute-force protection) + public contact form tables
+            try { context.Database.ExecuteSqlRaw(@"
+                CREATE TABLE IF NOT EXISTS ato_tracker_settings (
+                    ""Id"" TEXT PRIMARY KEY,
+                    ""Enabled"" BOOLEAN NOT NULL DEFAULT TRUE,
+                    ""MaxFailedAttempts"" INTEGER NOT NULL DEFAULT 5,
+                    ""WindowSeconds"" INTEGER NOT NULL DEFAULT 900,
+                    ""LockoutSeconds"" INTEGER NOT NULL DEFAULT 900,
+                    ""Action"" TEXT NOT NULL DEFAULT 'challenge',
+                    ""TrackByFingerprint"" BOOLEAN NOT NULL DEFAULT FALSE,
+                    ""AuthEndpoints"" TEXT NOT NULL DEFAULT '/api/auth/login,/api/auth/signup',
+                    ""UpdatedAt"" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS ato_tracker_events (
+                    ""Id"" TEXT PRIMARY KEY,
+                    ""Ip"" TEXT NOT NULL DEFAULT '',
+                    ""Fingerprint"" TEXT,
+                    ""TargetPath"" TEXT NOT NULL DEFAULT '',
+                    ""Failures"" INTEGER NOT NULL DEFAULT 0,
+                    ""Action"" TEXT NOT NULL DEFAULT 'logged',
+                    ""Timestamp"" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_ato_tracker_events_timestamp ON ato_tracker_events (""Timestamp"");
+
+                CREATE TABLE IF NOT EXISTS contact_messages (
+                    ""Id"" TEXT PRIMARY KEY,
+                    ""Name"" TEXT NOT NULL DEFAULT '',
+                    ""Email"" TEXT NOT NULL DEFAULT '',
+                    ""Subject"" TEXT,
+                    ""Message"" TEXT NOT NULL DEFAULT '',
+                    ""IpAddress"" TEXT,
+                    ""Status"" TEXT NOT NULL DEFAULT 'New',
+                    ""CreatedAt"" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_contact_messages_created_at ON contact_messages (""CreatedAt"");
+            "); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] ATO tracker / contact tables creation failed: {ex.Message}"); }
+
             // Seed the known Ethiopian + fallback residency zones once
             if (!context.DataResidencyZones.Any())
             {
@@ -217,6 +255,13 @@ namespace AffiniSecurity.Waf.Data
                     new KeyCustodyRecord { Scope = "AuditChainSecret", KeyManagementSystem = "Local Vault - Addis Ababa DC1", IsInCountry = true, Custodian = "Platform Security Team" },
                     new KeyCustodyRecord { Scope = "TLS", KeyManagementSystem = "Let's Encrypt / cert-manager (local issuance)", IsInCountry = true, Custodian = "Platform Security Team" },
                 });
+                context.SaveChanges();
+            }
+
+            // Seed the default global ATO tracker config so /api/ato/config has data on first load
+            if (!context.AtoTrackerSettings.Any())
+            {
+                context.AtoTrackerSettings.Add(new AtoSettings { Id = "global" });
                 context.SaveChanges();
             }
 

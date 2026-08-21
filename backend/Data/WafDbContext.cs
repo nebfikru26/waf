@@ -58,6 +58,9 @@ namespace AffiniSecurity.Waf.Data
         public DbSet<DataProcessingRecord> DataProcessingRecords { get; set; }
         public DbSet<IncidentClock> IncidentClocks { get; set; }
         public DbSet<KeyCustodyRecord> KeyCustodyRecords { get; set; }
+        public DbSet<AtoSettings> AtoTrackerSettings { get; set; }
+        public DbSet<AtoEvent> AtoTrackerEvents { get; set; }
+        public DbSet<ContactMessage> ContactMessages { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
