@@ -1,8 +1,12 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Shield, Scale, Gavel, History, CheckCircle2, AlertTriangle, RefreshCw, Lock, Download, Info, Loader2, BadgeCheck, FileJson } from "lucide-react";
+import { Shield, Scale, Gavel, History, CheckCircle2, AlertTriangle, RefreshCw, Lock, Download, Info, Loader2, BadgeCheck, FileJson, MapPin, Search, ShieldAlert, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 
 interface ComplianceProclamation {
@@ -29,6 +33,49 @@ interface ComplianceStatus {
 interface SystemConfig {
     ecaCertificationNumber?: string;
     [key: string]: unknown;
+}
+
+interface ResidencyZone {
+    code: string;
+    name: string;
+    countryCode: string;
+    facilityProvider?: string;
+    isInCountry: boolean;
+    isDefault: boolean;
+    tenantCount: number;
+}
+
+interface ResidencyTenantRow {
+    tenantId: string;
+    tenantName: string;
+    industry?: string;
+    zoneCode: string;
+    zoneName: string;
+    isInCountry: boolean;
+    requiresInCountry: boolean;
+    isCompliant: boolean;
+    lastVerifiedAt?: string;
+}
+
+interface DataSovereigntyOverview {
+    zones: ResidencyZone[];
+    tenants: ResidencyTenantRow[];
+    summary: {
+        totalTenants: number;
+        inCountryCount: number;
+        regulatedCount: number;
+        nonCompliantCount: number;
+    };
+}
+
+interface ResidencyHistoryEntry {
+    id: string;
+    tenantId: string;
+    zoneCode: string;
+    previousZoneCode?: string;
+    reason?: string;
+    changedByEmail?: string;
+    changedAt: string;
 }
 
 const Label = ({ children, className }: { children: React.ReactNode; className?: string }) => (
@@ -103,6 +150,48 @@ export const ComplianceCenter = () => {
             setIsExporting(false);
         }
     };
+
+    // --- Data Sovereignty: management + inspection ---
+    const [residencySearch, setResidencySearch] = useState("");
+    const [historyTenant, setHistoryTenant] = useState<{ id: string; name: string } | null>(null);
+
+    const { data: sovereignty, isLoading: isSovereigntyLoading } = useQuery<DataSovereigntyOverview>({
+        queryKey: ["data-sovereignty"],
+        queryFn: () => fetch("/api/compliance/data-sovereignty", { headers }).then(r => r.json())
+    });
+
+    const { data: residencyHistory, isLoading: isHistoryLoading } = useQuery<ResidencyHistoryEntry[]>({
+        queryKey: ["data-sovereignty-history", historyTenant?.id],
+        queryFn: () => fetch(`/api/compliance/data-sovereignty/history?tenantId=${historyTenant?.id}`, { headers }).then(r => r.json()),
+        enabled: !!historyTenant
+    });
+
+    const reassignZone = useMutation({
+        mutationFn: async ({ tenantId, zoneCode, reason }: { tenantId: string; zoneCode: string; reason?: string }) => {
+            const res = await fetch(`/api/compliance/data-sovereignty/tenants/${tenantId}`, {
+                method: "PUT",
+                headers,
+                body: JSON.stringify({ zoneCode, reason })
+            });
+            const body = await res.json();
+            if (!res.ok) throw new Error(body?.message ?? "Failed to reassign residency zone");
+            return body;
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["data-sovereignty"] });
+            toast({ title: "Residency Updated", description: "The tenant's data residency zone has been reassigned and logged." });
+        },
+        onError: (err: Error) => {
+            toast({ title: "Reassignment Blocked", description: err.message, variant: "destructive" });
+        }
+    });
+
+    const filteredTenants = useMemo(() => {
+        const rows = sovereignty?.tenants ?? [];
+        if (!residencySearch.trim()) return rows;
+        const q = residencySearch.toLowerCase();
+        return rows.filter(t => t.tenantName?.toLowerCase().includes(q) || t.industry?.toLowerCase().includes(q));
+    }, [sovereignty, residencySearch]);
 
     if (isLoading) return <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
 
@@ -278,6 +367,166 @@ export const ComplianceCenter = () => {
                     </Button>
                 </div>
             </div>
+
+            {/* Data Sovereignty: management + inspection */}
+            <div className="bg-card border border-border rounded-2xl p-6 space-y-5">
+                <div className="flex flex-col md:flex-row justify-between gap-4">
+                    <div className="space-y-1">
+                        <h3 className="text-lg font-bold flex items-center gap-2 font-mono uppercase tracking-tighter">
+                            <MapPin className="h-5 w-5 text-primary" /> Data Sovereignty & Residency
+                        </h3>
+                        <p className="text-[11px] text-muted-foreground">
+                            Where each tenant's logs, PII, and audit trail physically reside — required for in-country
+                            residency of regulated sectors (Banking, Government, Telecom, Insurance, Healthcare).
+                        </p>
+                    </div>
+                    <div className="relative w-full md:w-64">
+                        <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                        <Input
+                            className="pl-8 h-9 text-xs"
+                            placeholder="Search tenant or industry..."
+                            value={residencySearch}
+                            onChange={(e) => setResidencySearch(e.target.value)}
+                        />
+                    </div>
+                </div>
+
+                {/* Summary counters */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="p-3 bg-muted/10 border border-border/50 rounded-lg text-center">
+                        <div className="text-[9px] font-bold text-muted-foreground uppercase">Total Tenants</div>
+                        <div className="text-lg font-bold mt-1">{sovereignty?.summary.totalTenants ?? "—"}</div>
+                    </div>
+                    <div className="p-3 bg-green-500/5 border border-green-500/10 rounded-lg text-center">
+                        <div className="text-[9px] font-bold text-green-500 uppercase">In-Country</div>
+                        <div className="text-lg font-bold text-green-500 mt-1">{sovereignty?.summary.inCountryCount ?? "—"}</div>
+                    </div>
+                    <div className="p-3 bg-primary/5 border border-primary/10 rounded-lg text-center">
+                        <div className="text-[9px] font-bold text-primary uppercase">Regulated Sector</div>
+                        <div className="text-lg font-bold text-primary mt-1">{sovereignty?.summary.regulatedCount ?? "—"}</div>
+                    </div>
+                    <div className={`p-3 rounded-lg text-center border ${(sovereignty?.summary.nonCompliantCount ?? 0) > 0 ? "bg-destructive/5 border-destructive/20" : "bg-muted/10 border-border/50"}`}>
+                        <div className={`text-[9px] font-bold uppercase ${(sovereignty?.summary.nonCompliantCount ?? 0) > 0 ? "text-destructive" : "text-muted-foreground"}`}>Non-Compliant</div>
+                        <div className={`text-lg font-bold mt-1 ${(sovereignty?.summary.nonCompliantCount ?? 0) > 0 ? "text-destructive" : ""}`}>{sovereignty?.summary.nonCompliantCount ?? "—"}</div>
+                    </div>
+                </div>
+
+                {/* Zone catalog */}
+                <div className="flex flex-wrap gap-2">
+                    {sovereignty?.zones.map(z => (
+                        <div key={z.code} className={`px-3 py-1.5 rounded-full flex items-center gap-2 text-[10px] font-bold uppercase font-mono border ${z.isInCountry ? "bg-green-500/10 border-green-500/30 text-green-500" : "bg-amber-500/10 border-amber-500/30 text-amber-500"}`}>
+                            <MapPin className="h-3 w-3" /> {z.name} · {z.tenantCount}
+                        </div>
+                    ))}
+                </div>
+
+                {/* Tenant residency table */}
+                <div className="border border-border/50 rounded-xl overflow-hidden">
+                    <Table>
+                        <TableHeader>
+                            <TableRow>
+                                <TableHead className="text-[10px] uppercase">Tenant</TableHead>
+                                <TableHead className="text-[10px] uppercase">Industry</TableHead>
+                                <TableHead className="text-[10px] uppercase">Residency Zone</TableHead>
+                                <TableHead className="text-[10px] uppercase">Status</TableHead>
+                                <TableHead className="text-[10px] uppercase text-right">Inspect</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {isSovereigntyLoading && (
+                                <TableRow><TableCell colSpan={5} className="text-center py-8"><Loader2 className="h-5 w-5 animate-spin mx-auto text-primary" /></TableCell></TableRow>
+                            )}
+                            {!isSovereigntyLoading && filteredTenants.length === 0 && (
+                                <TableRow><TableCell colSpan={5} className="text-center py-8 text-xs text-muted-foreground">No tenants match your search.</TableCell></TableRow>
+                            )}
+                            {filteredTenants.map(t => (
+                                <TableRow key={t.tenantId}>
+                                    <TableCell className="text-xs font-medium">{t.tenantName}</TableCell>
+                                    <TableCell className="text-xs text-muted-foreground">{t.industry || "—"}</TableCell>
+                                    <TableCell>
+                                        <Select
+                                            value={t.zoneCode}
+                                            onValueChange={(zoneCode) => {
+                                                const targetZone = sovereignty?.zones.find(z => z.code === zoneCode);
+                                                const needsReason = t.requiresInCountry && targetZone && !targetZone.isInCountry;
+                                                const reason = needsReason
+                                                    ? window.prompt(`"${t.tenantName}" is in a regulated sector requiring in-country residency. Enter a documented exception reason to move it to "${targetZone?.name}":`) ?? undefined
+                                                    : undefined;
+                                                if (needsReason && !reason) return; // user cancelled
+                                                reassignZone.mutate({ tenantId: t.tenantId, zoneCode, reason });
+                                            }}
+                                        >
+                                            <SelectTrigger className="h-8 text-xs w-56">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {sovereignty?.zones.map(z => (
+                                                    <SelectItem key={z.code} value={z.code} className="text-xs">
+                                                        {z.name} {z.isInCountry ? "🇪🇹" : "🌐"}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </TableCell>
+                                    <TableCell>
+                                        {t.isCompliant ? (
+                                            <Badge variant="outline" className="text-[10px] gap-1 border-green-500/30 text-green-500 bg-green-500/10">
+                                                <CheckCircle2 className="h-3 w-3" /> Compliant
+                                            </Badge>
+                                        ) : (
+                                            <Badge variant="outline" className="text-[10px] gap-1 border-destructive/30 text-destructive bg-destructive/10">
+                                                <ShieldAlert className="h-3 w-3" /> Review Needed
+                                            </Badge>
+                                        )}
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                        <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            className="h-7 text-[10px] gap-1"
+                                            onClick={() => setHistoryTenant({ id: t.tenantId, name: t.tenantName })}
+                                        >
+                                            <History className="h-3.5 w-3.5" /> History
+                                        </Button>
+                                    </TableCell>
+                                </TableRow>
+                            ))}
+                        </TableBody>
+                    </Table>
+                </div>
+            </div>
+
+            {/* Residency change history dialog */}
+            <Dialog open={!!historyTenant} onOpenChange={(open) => !open && setHistoryTenant(null)}>
+                <DialogContent className="max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-base">
+                            <History className="h-4 w-4 text-primary" /> Residency History — {historyTenant?.name}
+                        </DialogTitle>
+                        <DialogDescription>Full audit trail of data residency zone changes for this tenant.</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3 max-h-96 overflow-y-auto">
+                        {isHistoryLoading && <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>}
+                        {!isHistoryLoading && (residencyHistory?.length ?? 0) === 0 && (
+                            <p className="text-xs text-muted-foreground text-center py-6">No residency changes recorded yet — tenant is on its default zone.</p>
+                        )}
+                        {residencyHistory?.map(h => (
+                            <div key={h.id} className="p-3 border border-border/50 rounded-lg space-y-1">
+                                <div className="flex items-center justify-between text-[11px] font-mono text-muted-foreground">
+                                    <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {new Date(h.changedAt).toLocaleString()}</span>
+                                    <span>{h.changedByEmail ?? "system"}</span>
+                                </div>
+                                <div className="text-xs">
+                                    <span className="text-muted-foreground">{h.previousZoneCode ?? "—"}</span>
+                                    <span className="mx-1.5">→</span>
+                                    <span className="font-bold">{h.zoneCode}</span>
+                                </div>
+                                {h.reason && <div className="text-[11px] text-muted-foreground italic">Reason: {h.reason}</div>}
+                            </div>
+                        ))}
+                    </div>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 };

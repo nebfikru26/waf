@@ -107,6 +107,48 @@ namespace AffiniSecurity.Waf.Data
                 CREATE INDEX IF NOT EXISTS idx_service_subscriptions_tenant_id ON service_subscriptions (""TenantId"");
             "); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Tenant management tables creation failed: {ex.Message}"); }
 
+            // Data Sovereignty: per-tenant residency zone + inspectable assignment history
+            try { context.Database.ExecuteSqlRaw("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS \"DataResidencyZoneCode\" TEXT DEFAULT 'ET-ADDIS-DC1';"); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Failed: {ex.Message}"); }
+            try { context.Database.ExecuteSqlRaw("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS \"RequiresInCountryResidency\" BOOLEAN DEFAULT FALSE;"); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Failed: {ex.Message}"); }
+            try { context.Database.ExecuteSqlRaw("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS \"DataResidencyLastVerifiedAt\" TIMESTAMP WITH TIME ZONE;"); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Failed: {ex.Message}"); }
+
+            try { context.Database.ExecuteSqlRaw(@"
+                CREATE TABLE IF NOT EXISTS data_residency_zones (
+                    ""Id"" TEXT PRIMARY KEY,
+                    ""Code"" TEXT NOT NULL UNIQUE,
+                    ""Name"" TEXT NOT NULL,
+                    ""CountryCode"" TEXT NOT NULL DEFAULT 'ET',
+                    ""FacilityProvider"" TEXT,
+                    ""IsInCountry"" BOOLEAN NOT NULL DEFAULT TRUE,
+                    ""IsDefault"" BOOLEAN NOT NULL DEFAULT FALSE,
+                    ""IsActive"" BOOLEAN NOT NULL DEFAULT TRUE,
+                    ""CreatedAt"" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS data_residency_assignments (
+                    ""Id"" TEXT PRIMARY KEY,
+                    ""TenantId"" TEXT NOT NULL,
+                    ""ZoneCode"" TEXT NOT NULL,
+                    ""PreviousZoneCode"" TEXT,
+                    ""Reason"" TEXT,
+                    ""ChangedByEmail"" TEXT,
+                    ""ChangedAt"" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_data_residency_assignments_tenant_id ON data_residency_assignments (""TenantId"");
+            "); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Data sovereignty tables creation failed: {ex.Message}"); }
+
+            // Seed the known Ethiopian + fallback residency zones once
+            if (!context.DataResidencyZones.Any())
+            {
+                context.DataResidencyZones.AddRange(new List<DataResidencyZone>
+                {
+                    new DataResidencyZone { Code = "ET-ADDIS-DC1", Name = "Addis Ababa Primary DC (INSA-audited)", CountryCode = "ET", FacilityProvider = "ethio telecom / Local Colocation", IsInCountry = true, IsDefault = true },
+                    new DataResidencyZone { Code = "ET-ADDIS-DC2", Name = "Addis Ababa Secondary DC (DR Site)", CountryCode = "ET", FacilityProvider = "Local Colocation", IsInCountry = true, IsDefault = false },
+                    new DataResidencyZone { Code = "GLOBAL-EDGE", Name = "Global CDN Edge (Cache/Static Only — No PII)", CountryCode = "GLOBAL", FacilityProvider = "Multi-Region Edge", IsInCountry = false, IsDefault = false },
+                });
+                context.SaveChanges();
+            }
+
             // Seed Templates if empty
             if (!context.RuleSetTemplates.Any())
             {
