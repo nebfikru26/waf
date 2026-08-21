@@ -17,6 +17,7 @@ import AlertsPage from "./pages/AlertsPage";
 import SettingsPage from "./pages/SettingsPage";
 import AdminPage from "./pages/AdminPage";
 import AdminTenantPage from "./pages/AdminTenantPage";
+import AdminContactMessagesPage from "./pages/AdminContactMessagesPage";
 import "antd/dist/reset.css";
 import UsersPage from "./pages/UsersPage";
 import BillingPage from "./pages/BillingPage";
@@ -76,6 +77,7 @@ function AppRoutes() {
               <Route path="/admin/tenants" element={<AdminTenantPage />} />
               <Route path="/admin/templates" element={<TemplateLibraryPage />} />
               <Route path="/admin/ai-threats" element={<AiThreatIntelligencePage />} />
+              <Route path="/admin/contact-messages" element={<AdminContactMessagesPage />} />
               <Route path="/users" element={<UsersPage />} />
               <Route path="/crs-rules" element={<CrsRulesPage />} />
               <Route path="/crs-dashboard" element={<CrsDashboardPage />} />

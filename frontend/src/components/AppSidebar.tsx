@@ -19,6 +19,7 @@ import {
   Gauge,
   LayoutGrid,
   BrainCircuit,
+  Inbox,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth, type AuthUser, type Role } from "@/hooks/use-auth";
@@ -60,6 +61,7 @@ const adminMainNav: NavItem[] = [
   { title: "CRS Threat Intelligence", url: "/crs-dashboard", icon: BarChart3, roles: ["super_admin"] },
   { title: "AI Threat Intelligence", url: "/admin/ai-threats", icon: BrainCircuit, roles: ["super_admin", "admin"] },
   { title: "Golden Image Hub", url: "/admin/templates", icon: LayoutGrid, roles: ["super_admin", "admin"] },
+  { title: "Contact Messages", url: "/admin/contact-messages", icon: Inbox, roles: ["super_admin", "admin", "support_engineer"] },
   { title: "User Management", url: "/users", icon: UserCog, roles: ["super_admin", "support_engineer", "admin"] },
   { title: "Audit & Compliance", url: "/audit-logs", icon: Shield, roles: ["super_admin", "admin", "support_engineer"] },
   { title: "My Profile", url: "/profile", icon: User, roles: ["super_admin", "support_engineer", "admin"] },
