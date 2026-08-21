@@ -298,11 +298,10 @@ const EMPTY_RULE = {
   raw_content: "",
 };
 
-function CustomRuleBuilder({ initialRule, onSave, onCancel, token }: {
+function CustomRuleBuilder({ initialRule, onSave, onCancel }: {
   initialRule?: CustomRule;
   onSave: (rule: typeof EMPTY_RULE) => void;
   onCancel: () => void;
-  token: string | null;
 }) {
   const [form, setForm] = useState(initialRule ? { ...initialRule } : { ...EMPTY_RULE });
   const [showSecond, setShowSecond] = useState(!!form.logic_operator);
@@ -1630,7 +1629,6 @@ export default function PoliciesPage() {
                           initialRule={editingRule || undefined}
                           onSave={saveCustomRule}
                           onCancel={() => { setShowRuleBuilder(false); setEditingRule(null); }}
-                          token={token}
                         />
                       )}
 

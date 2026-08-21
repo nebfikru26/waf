@@ -177,6 +177,25 @@ namespace AffiniSecurity.Waf.Services
                         Console.WriteLine($"[Ingester] Failed to publish CRS SSE event to NATS: {ex.Message}");
                     }
                 }
+
+                // Auto-open an INSA CERT (48h) / breach (72h) reporting clock for CRITICAL events
+                // affecting a real tenant, so the regulatory deadline is tracked from the moment
+                // the incident is detected rather than whenever someone remembers to file it.
+                if (severityStr == "CRITICAL" && tenantId != "global")
+                {
+                    try
+                    {
+                        var incidentService = scope.ServiceProvider.GetService<IIncidentClockService>();
+                        if (incidentService != null)
+                        {
+                            await incidentService.OpenAsync(tenantId, $"WAF Critical Alert: {ruleMessage}", severityStr, alert.Id);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[Ingester] Failed to open incident clock: {ex.Message}");
+                    }
+                }
             }
 
             await db.SaveChangesAsync();

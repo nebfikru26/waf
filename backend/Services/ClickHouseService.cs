@@ -72,6 +72,12 @@ namespace AffiniSecurity.Waf.Services
         public double AvgScore { get; set; }
     }
 
+    public class TrafficBucket
+    {
+        public string Time { get; set; } = ""; // "yyyy-MM-dd HH:00:00"
+        public long Requests { get; set; }
+    }
+
     public class GlobalThreatReport
     {
         public List<TenantThreatStat> TopTargetedTenants { get; set; } = new();
@@ -88,6 +94,7 @@ namespace AffiniSecurity.Waf.Services
         Task InitializeAsync();
         Task InsertTrafficLogAsync(string tenantId, string time, int requests = 1, int blocked = 0);
         Task<long> GetTotalRequestsAsync();
+        Task<List<TrafficBucket>> GetTrafficSeriesAsync(DateTime sinceUtc);
         Task InsertAiBlockedEventAsync(string tenantId, string url, string method, double score, double mlScore, double astScore, string[] matches, string ja4, byte schemaDeviation);
         Task<List<AiBlockedEvent>> GetAiBlockedEventsAsync(string tenantId);
         Task<List<AiBlockedEvent>> GetAiBlockedEventsByIdentifiersAsync(List<string> identifiers);
@@ -287,6 +294,45 @@ namespace AffiniSecurity.Waf.Services
                 return 0;
             }
         }
+
+        // Hourly request-volume buckets, real data written by TrafficLoggerMiddleware on
+        // every request. Time is stored as an hour-truncated string ("yyyy-MM-dd HH:00:00"),
+        // which is lexically sortable, so a simple string >= comparison works as a time filter.
+        public async Task<List<TrafficBucket>> GetTrafficSeriesAsync(DateTime sinceUtc)
+        {
+            var buckets = new List<TrafficBucket>();
+            try
+            {
+                using var connection = new ClickHouseConnection(_connectionString);
+                await connection.OpenAsync();
+
+                var command = connection.CreateCommand();
+                command.CommandText = @"
+                    SELECT Time, sum(Requests) as Total
+                    FROM network_metadata
+                    WHERE Time >= {since:String}
+                    GROUP BY Time
+                    ORDER BY Time
+                ";
+                command.Parameters.Add(new ClickHouseDbParameter { ParameterName = "since", Value = sinceUtc.ToString("yyyy-MM-dd HH:00:00") });
+
+                using var reader = await command.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    buckets.Add(new TrafficBucket
+                    {
+                        Time = reader.GetString(0),
+                        Requests = Convert.ToInt64(reader.GetValue(1))
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ClickHouse] Error fetching traffic series: {ex.Message}");
+            }
+            return buckets;
+        }
+
 
         public async Task<List<AiBlockedEvent>> GetAiBlockedEventsAsync(string tenantId)
         {

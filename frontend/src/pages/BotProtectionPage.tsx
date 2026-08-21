@@ -60,7 +60,7 @@ export default function BotProtectionPage() {
 
   const { data: botData, isLoading: isLoadingAnalytics } = useQuery<any>({
     queryKey: ["bot-analytics", user?.tenantId],
-    queryFn: () => fetch("/api/analytics/bot", { headers }).then(r => r.json())
+    queryFn: () => fetch("/api/analytics/bots", { headers }).then(r => r.json())
   });
 
   const [sensitivityLevel, setSensitivityLevel] = useState("medium");

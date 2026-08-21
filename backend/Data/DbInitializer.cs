@@ -107,6 +107,164 @@ namespace AffiniSecurity.Waf.Data
                 CREATE INDEX IF NOT EXISTS idx_service_subscriptions_tenant_id ON service_subscriptions (""TenantId"");
             "); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Tenant management tables creation failed: {ex.Message}"); }
 
+            // Data Sovereignty: per-tenant residency zone + inspectable assignment history
+            try { context.Database.ExecuteSqlRaw("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS \"DataResidencyZoneCode\" TEXT DEFAULT 'ET-ADDIS-DC1';"); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Failed: {ex.Message}"); }
+            try { context.Database.ExecuteSqlRaw("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS \"RequiresInCountryResidency\" BOOLEAN DEFAULT FALSE;"); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Failed: {ex.Message}"); }
+            try { context.Database.ExecuteSqlRaw("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS \"DataResidencyLastVerifiedAt\" TIMESTAMP WITH TIME ZONE;"); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Failed: {ex.Message}"); }
+
+            try { context.Database.ExecuteSqlRaw(@"
+                CREATE TABLE IF NOT EXISTS data_residency_zones (
+                    ""Id"" TEXT PRIMARY KEY,
+                    ""Code"" TEXT NOT NULL UNIQUE,
+                    ""Name"" TEXT NOT NULL,
+                    ""CountryCode"" TEXT NOT NULL DEFAULT 'ET',
+                    ""FacilityProvider"" TEXT,
+                    ""IsInCountry"" BOOLEAN NOT NULL DEFAULT TRUE,
+                    ""IsDefault"" BOOLEAN NOT NULL DEFAULT FALSE,
+                    ""IsActive"" BOOLEAN NOT NULL DEFAULT TRUE,
+                    ""CreatedAt"" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS data_residency_assignments (
+                    ""Id"" TEXT PRIMARY KEY,
+                    ""TenantId"" TEXT NOT NULL,
+                    ""ZoneCode"" TEXT NOT NULL,
+                    ""PreviousZoneCode"" TEXT,
+                    ""Reason"" TEXT,
+                    ""ChangedByEmail"" TEXT,
+                    ""ChangedAt"" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_data_residency_assignments_tenant_id ON data_residency_assignments (""TenantId"");
+            "); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Data sovereignty tables creation failed: {ex.Message}"); }
+
+            // Data class enforcement: what categories of data each zone may legally hold
+            try { context.Database.ExecuteSqlRaw("ALTER TABLE data_residency_zones ADD COLUMN IF NOT EXISTS \"AllowedDataClasses\" TEXT DEFAULT 'PII,Logs,Audit,Static,Cache';"); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Failed: {ex.Message}"); }
+
+            // Governance tables: processing register (DPIA), incident reporting clocks, key custody
+            try { context.Database.ExecuteSqlRaw(@"
+                CREATE TABLE IF NOT EXISTS data_processing_records (
+                    ""Id"" TEXT PRIMARY KEY,
+                    ""TenantId"" TEXT NOT NULL,
+                    ""Purpose"" TEXT NOT NULL,
+                    ""DataCategories"" TEXT NOT NULL DEFAULT '',
+                    ""LegalBasis"" TEXT NOT NULL DEFAULT 'Contract',
+                    ""RetentionPeriod"" TEXT NOT NULL DEFAULT '365 Days',
+                    ""SubProcessors"" TEXT,
+                    ""DpiaRequired"" BOOLEAN NOT NULL DEFAULT FALSE,
+                    ""DpiaCompletedAt"" TIMESTAMP WITH TIME ZONE,
+                    ""DpiaSummary"" TEXT,
+                    ""CreatedAt"" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+                    ""UpdatedAt"" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_data_processing_records_tenant_id ON data_processing_records (""TenantId"");
+
+                CREATE TABLE IF NOT EXISTS incident_clocks (
+                    ""Id"" TEXT PRIMARY KEY,
+                    ""TenantId"" TEXT NOT NULL,
+                    ""AlertLogId"" TEXT,
+                    ""Title"" TEXT NOT NULL,
+                    ""Severity"" TEXT NOT NULL DEFAULT 'HIGH',
+                    ""DetectedAt"" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+                    ""CertDeadline"" TIMESTAMP WITH TIME ZONE NOT NULL,
+                    ""BreachDeadline"" TIMESTAMP WITH TIME ZONE NOT NULL,
+                    ""ReportedToCertAt"" TIMESTAMP WITH TIME ZONE,
+                    ""ReportedByCertEmail"" TEXT,
+                    ""ReportedAsBreachAt"" TIMESTAMP WITH TIME ZONE,
+                    ""ReportedByBreachEmail"" TEXT,
+                    ""Status"" TEXT NOT NULL DEFAULT 'Open',
+                    ""Notes"" TEXT,
+                    ""ResolvedAt"" TIMESTAMP WITH TIME ZONE
+                );
+                CREATE INDEX IF NOT EXISTS idx_incident_clocks_tenant_id ON incident_clocks (""TenantId"");
+                CREATE INDEX IF NOT EXISTS idx_incident_clocks_status ON incident_clocks (""Status"");
+
+                CREATE TABLE IF NOT EXISTS key_custody_records (
+                    ""Id"" TEXT PRIMARY KEY,
+                    ""TenantId"" TEXT,
+                    ""Scope"" TEXT NOT NULL,
+                    ""KeyManagementSystem"" TEXT NOT NULL,
+                    ""IsInCountry"" BOOLEAN NOT NULL DEFAULT TRUE,
+                    ""Custodian"" TEXT,
+                    ""LastRotatedAt"" TIMESTAMP WITH TIME ZONE,
+                    ""VerifiedAt"" TIMESTAMP WITH TIME ZONE,
+                    ""CreatedAt"" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+                );
+            "); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] Governance tables creation failed: {ex.Message}"); }
+
+            // ATO tracker (global login/signup brute-force protection) + public contact form tables
+            try { context.Database.ExecuteSqlRaw(@"
+                CREATE TABLE IF NOT EXISTS ato_tracker_settings (
+                    ""Id"" TEXT PRIMARY KEY,
+                    ""Enabled"" BOOLEAN NOT NULL DEFAULT TRUE,
+                    ""MaxFailedAttempts"" INTEGER NOT NULL DEFAULT 5,
+                    ""WindowSeconds"" INTEGER NOT NULL DEFAULT 900,
+                    ""LockoutSeconds"" INTEGER NOT NULL DEFAULT 900,
+                    ""Action"" TEXT NOT NULL DEFAULT 'challenge',
+                    ""TrackByFingerprint"" BOOLEAN NOT NULL DEFAULT FALSE,
+                    ""AuthEndpoints"" TEXT NOT NULL DEFAULT '/api/auth/login,/api/auth/signup',
+                    ""UpdatedAt"" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS ato_tracker_events (
+                    ""Id"" TEXT PRIMARY KEY,
+                    ""Ip"" TEXT NOT NULL DEFAULT '',
+                    ""Fingerprint"" TEXT,
+                    ""TargetPath"" TEXT NOT NULL DEFAULT '',
+                    ""Failures"" INTEGER NOT NULL DEFAULT 0,
+                    ""Action"" TEXT NOT NULL DEFAULT 'logged',
+                    ""Timestamp"" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_ato_tracker_events_timestamp ON ato_tracker_events (""Timestamp"");
+
+                CREATE TABLE IF NOT EXISTS contact_messages (
+                    ""Id"" TEXT PRIMARY KEY,
+                    ""Name"" TEXT NOT NULL DEFAULT '',
+                    ""Email"" TEXT NOT NULL DEFAULT '',
+                    ""Subject"" TEXT,
+                    ""Message"" TEXT NOT NULL DEFAULT '',
+                    ""IpAddress"" TEXT,
+                    ""Status"" TEXT NOT NULL DEFAULT 'New',
+                    ""CreatedAt"" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_contact_messages_created_at ON contact_messages (""CreatedAt"");
+            "); } catch (Exception ex) { Console.WriteLine($"[DbInitializer] ATO tracker / contact tables creation failed: {ex.Message}"); }
+
+            // Seed the known Ethiopian + fallback residency zones once
+            if (!context.DataResidencyZones.Any())
+            {
+                context.DataResidencyZones.AddRange(new List<DataResidencyZone>
+                {
+                    new DataResidencyZone { Code = "ET-ADDIS-DC1", Name = "Addis Ababa Primary DC (INSA-audited)", CountryCode = "ET", FacilityProvider = "ethio telecom / Local Colocation", IsInCountry = true, IsDefault = true, AllowedDataClasses = "PII,Logs,Audit,Static,Cache" },
+                    new DataResidencyZone { Code = "ET-ADDIS-DC2", Name = "Addis Ababa Secondary DC (DR Site)", CountryCode = "ET", FacilityProvider = "Local Colocation", IsInCountry = true, IsDefault = false, AllowedDataClasses = "PII,Logs,Audit,Static,Cache" },
+                    new DataResidencyZone { Code = "GLOBAL-EDGE", Name = "Global CDN Edge (Cache/Static Only — No PII)", CountryCode = "GLOBAL", FacilityProvider = "Multi-Region Edge", IsInCountry = false, IsDefault = false, AllowedDataClasses = "Static,Cache" },
+                });
+                context.SaveChanges();
+            }
+            else
+            {
+                // Correct the global edge zone's allowed classes even if it was seeded by an older version
+                try { context.Database.ExecuteSqlRaw("UPDATE data_residency_zones SET \"AllowedDataClasses\" = 'Static,Cache' WHERE \"Code\" = 'GLOBAL-EDGE' AND (\"AllowedDataClasses\" IS NULL OR \"AllowedDataClasses\" LIKE '%PII%');"); } catch { }
+            }
+
+            // Seed baseline key custody records (platform-wide) so the sovereignty dashboard has data on first boot
+            if (!context.KeyCustodyRecords.Any())
+            {
+                context.KeyCustodyRecords.AddRange(new List<KeyCustodyRecord>
+                {
+                    new KeyCustodyRecord { Scope = "DatabaseAtRest", KeyManagementSystem = "Local Vault - Addis Ababa DC1", IsInCountry = true, Custodian = "Platform Security Team" },
+                    new KeyCustodyRecord { Scope = "AuditChainSecret", KeyManagementSystem = "Local Vault - Addis Ababa DC1", IsInCountry = true, Custodian = "Platform Security Team" },
+                    new KeyCustodyRecord { Scope = "TLS", KeyManagementSystem = "Let's Encrypt / cert-manager (local issuance)", IsInCountry = true, Custodian = "Platform Security Team" },
+                });
+                context.SaveChanges();
+            }
+
+            // Seed the default global ATO tracker config so /api/ato/config has data on first load
+            if (!context.AtoTrackerSettings.Any())
+            {
+                context.AtoTrackerSettings.Add(new AtoSettings { Id = "global" });
+                context.SaveChanges();
+            }
+
             // Seed Templates if empty
             if (!context.RuleSetTemplates.Any())
             {

@@ -53,6 +53,14 @@ namespace AffiniSecurity.Waf.Data
         public DbSet<IocIndicator> IocIndicators { get; set; }
         public DbSet<TenantRuleSet> TenantRuleSets { get; set; }
         public DbSet<RuleSetTemplate> RuleSetTemplates { get; set; }
+        public DbSet<DataResidencyZone> DataResidencyZones { get; set; }
+        public DbSet<DataResidencyAssignment> DataResidencyAssignments { get; set; }
+        public DbSet<DataProcessingRecord> DataProcessingRecords { get; set; }
+        public DbSet<IncidentClock> IncidentClocks { get; set; }
+        public DbSet<KeyCustodyRecord> KeyCustodyRecords { get; set; }
+        public DbSet<AtoSettings> AtoTrackerSettings { get; set; }
+        public DbSet<AtoEvent> AtoTrackerEvents { get; set; }
+        public DbSet<ContactMessage> ContactMessages { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

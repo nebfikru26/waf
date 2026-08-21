@@ -72,6 +72,22 @@ namespace AffiniSecurity.Waf.Models
         [JsonPropertyName("onboardingStep")]
         public int OnboardingStep { get; set; } = 0;
 
+        // --- Regulatory & Data Sovereignty (Proclamation 1321/2024, INSA Directive 808/2013) ---
+
+        /// <summary>Code of the DataResidencyZone this tenant's logs/PII/audit trail are pinned to.</summary>
+        [JsonPropertyName("dataResidencyZoneCode")]
+        public string DataResidencyZoneCode { get; set; } = "ET-ADDIS-DC1";
+
+        /// <summary>
+        /// Regulated sectors (Banking, Government, Telecom, Insurance) must keep data in-country.
+        /// Computed server-side from Industry, but persisted so it can be audited/overridden explicitly.
+        /// </summary>
+        [JsonPropertyName("requiresInCountryResidency")]
+        public bool RequiresInCountryResidency { get; set; } = false;
+
+        [JsonPropertyName("dataResidencyLastVerifiedAt")]
+        public DateTime? DataResidencyLastVerifiedAt { get; set; }
+
         [JsonIgnore]
         public virtual ICollection<ServiceSubscription> Subscriptions { get; set; } = new List<ServiceSubscription>();
         

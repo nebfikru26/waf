@@ -202,6 +202,94 @@ namespace AffiniSecurity.Waf.Controllers
         }
 
         // ============================================================
+        // Summary — used by the main Analytics dashboard. total_requests/time_series
+        // come from ClickHouse network_metadata (real per-hour request volume written
+        // by TrafficLoggerMiddleware on every request). threats_blocked/threat_breakdown
+        // come from real AlertLog rows. avg_latency_ms is honestly returned as null: no
+        // per-request latency capture exists anywhere in the pipeline. source is
+        // "database" (there is no Elasticsearch backend in this deployment).
+        // ============================================================
+        [HttpGet("summary")]
+        public async Task<IActionResult> GetSummary([FromQuery] string range = "24h")
+        {
+            var isAdmin = User.IsInRole("admin") || User.IsInRole("super_admin") || User.IsInRole("support_engineer");
+            var query = _context.AlertLogs.AsQueryable();
+            if (isAdmin) query = query.IgnoreQueryFilters();
+
+            var (since, bucketHours, bucketCount, labelFormat) = range switch
+            {
+                "1h" => (DateTime.UtcNow.AddHours(-1), 0, 12, "mm"),      // 5-minute buckets, handled separately
+                "7d" => (DateTime.UtcNow.AddDays(-7), 24, 7, "ddd"),
+                "30d" => (DateTime.UtcNow.AddDays(-30), 24, 30, "MM/dd"),
+                _ => (DateTime.UtcNow.AddHours(-24), 1, 24, "HH:00"),
+            };
+
+            var alerts = await query.Select(a => new { a.Timestamp, a.Rule, a.Action }).ToListAsync();
+            var parsedAlerts = alerts
+                .Select(a => new { Time = DateTime.TryParse(a.Timestamp, out var t) ? t : (DateTime?)null, a.Rule, a.Action })
+                .Where(a => a.Time.HasValue && a.Time.Value >= since)
+                .ToList();
+
+            var trafficBuckets = await _clickHouse.GetTrafficSeriesAsync(since);
+            var totalRequests = trafficBuckets.Sum(b => b.Requests);
+            var threatsBlocked = parsedAlerts.Count(a => a.Action == "blocked" || a.Action == "BLOCK");
+
+            // Index real ClickHouse hourly buckets by their hour for fast lookup while re-bucketing.
+            var hourlyRequestLookup = trafficBuckets
+                .Where(b => DateTime.TryParse(b.Time, out _))
+                .ToDictionary(b => DateTime.Parse(b.Time), b => b.Requests);
+
+            var now = DateTime.UtcNow;
+            List<object> timeSeries;
+            if (range == "1h")
+            {
+                // 5-minute buckets — request volume isn't tracked at sub-hour granularity,
+                // so distribute the current hour's real total evenly rather than fabricate spikes.
+                var currentHourRequests = hourlyRequestLookup
+                    .Where(kv => kv.Key >= now.AddHours(-1))
+                    .Sum(kv => kv.Value);
+                var perBucket = currentHourRequests / 12.0;
+                timeSeries = Enumerable.Range(0, 12)
+                    .Select(i => now.AddMinutes(-(11 - i) * 5))
+                    .Select(t => (object)new { time = t.ToString("HH:mm"), requests = (long)Math.Round(perBucket) })
+                    .ToList();
+            }
+            else
+            {
+                timeSeries = Enumerable.Range(0, bucketCount)
+                    .Select(i => now.AddHours(-(bucketCount - 1 - i) * bucketHours))
+                    .Select(bucketStart =>
+                    {
+                        var bucketEnd = bucketStart.AddHours(bucketHours);
+                        var requests = hourlyRequestLookup
+                            .Where(kv => kv.Key >= bucketStart && kv.Key < bucketEnd)
+                            .Sum(kv => kv.Value);
+                        return (object)new { time = bucketStart.ToString(labelFormat), requests };
+                    })
+                    .ToList();
+            }
+
+            var threatBreakdown = parsedAlerts
+                .Where(a => !string.IsNullOrEmpty(a.Rule))
+                .GroupBy(a => a.Rule)
+                .OrderByDescending(g => g.Count())
+                .Take(6)
+                .Select(g => new { name = g.Key, value = g.Count() })
+                .ToArray();
+
+            return Ok(new
+            {
+                source = "database",
+                timeRange = range,
+                totalRequests,
+                threatsBlocked,
+                avgLatencyMs = (string?)null,
+                timeSeries,
+                threatBreakdown,
+            });
+        }
+
+        // ============================================================
         // Traffic overview — TotalRequests is real (ClickHouse network_metadata,
         // populated by TrafficLoggerMiddleware on every request). RegionalData is
         // real GeoIP-resolved country breakdown of alert-log IPs. StatusCounts and
@@ -229,6 +317,130 @@ namespace AffiniSecurity.Waf.Controllers
                 StatusCounts = Array.Empty<object>(),
                 MethodDistribution = Array.Empty<object>(),
                 RegionalData = regional
+            });
+        }
+
+        // ============================================================
+        // Absolute-route dashboard traffic time series (/api/traffic, not
+        // /api/analytics/traffic — consumed by the main Dashboard "Requests Over
+        // Time" chart). requests are real hourly volume from ClickHouse
+        // network_metadata; blocked is real, derived from AlertLog rows in the
+        // same hour bucket (the ClickHouse Blocked column is never populated by
+        // TrafficLoggerMiddleware, so AlertLogs is the honest source of truth
+        // for what was actually blocked).
+        // ============================================================
+        [HttpGet("/api/traffic")]
+        public async Task<IActionResult> GetDashboardTrafficSeries()
+        {
+            var isAdmin = User.IsInRole("admin") || User.IsInRole("super_admin") || User.IsInRole("support_engineer");
+            var query = _context.AlertLogs.Where(a => a.Action == "blocked" || a.Action == "BLOCK");
+            if (isAdmin) query = (IQueryable<AlertLog>)query.IgnoreQueryFilters();
+
+            var since = DateTime.UtcNow.AddHours(-24);
+            var blockedAlerts = await query.Select(a => a.Timestamp).ToListAsync();
+            var blockedTimes = blockedAlerts
+                .Select(t => DateTime.TryParse(t, out var parsed) ? parsed : (DateTime?)null)
+                .Where(t => t.HasValue && t.Value >= since)
+                .Select(t => t!.Value)
+                .ToList();
+
+            var trafficBuckets = await _clickHouse.GetTrafficSeriesAsync(since);
+            var hourlyRequests = trafficBuckets
+                .Where(b => DateTime.TryParse(b.Time, out _))
+                .ToDictionary(b => DateTime.Parse(b.Time), b => b.Requests);
+
+            var now = DateTime.UtcNow;
+            var series = Enumerable.Range(0, 24)
+                .Select(i => new DateTime(now.Year, now.Month, now.Day, now.Hour, 0, 0, DateTimeKind.Utc).AddHours(-(23 - i)))
+                .Select(hourStart => new
+                {
+                    time = hourStart.ToString("HH:00"),
+                    requests = hourlyRequests.TryGetValue(hourStart, out var r) ? r : 0,
+                    blocked = blockedTimes.Count(t => t >= hourStart && t < hourStart.AddHours(1))
+                })
+                .ToArray();
+
+            return Ok(series);
+        }
+
+        // ============================================================
+        // DDoS / L7 flood analysis — real, backed by AlertLog rows persisted by
+        // DistributedRateLimiterMiddleware (Rule = "RATE_LIMIT_EXCEEDED"), the
+        // only volumetric/flood detection signal captured anywhere in this
+        // deployment's telemetry pipeline. peakBps/peakPps/duration/peakTraffic/
+        // avgLatency have no real network-bandwidth or latency telemetry source,
+        // so they are honestly omitted rather than fabricated.
+        // ============================================================
+        [HttpGet("ddos")]
+        public async Task<IActionResult> GetDdosAnalysis()
+        {
+            var isAdmin = User.IsInRole("admin") || User.IsInRole("super_admin") || User.IsInRole("support_engineer");
+            var query = _context.AlertLogs.Where(a => a.Rule == "RATE_LIMIT_EXCEEDED");
+            if (isAdmin) query = (IQueryable<AlertLog>)query.IgnoreQueryFilters();
+
+            var events = await query.Select(a => new { a.Ip, a.Timestamp, a.Action }).ToListAsync();
+            var parsed = events
+                .Select(e => new { Time = DateTime.TryParse(e.Timestamp, out var t) ? t : (DateTime?)null, e.Ip, e.Action })
+                .Where(e => e.Time.HasValue)
+                .Select(e => new { Time = e.Time!.Value, e.Ip, e.Action })
+                .ToList();
+
+            var since = DateTime.UtcNow.AddHours(-24);
+            var recent = parsed.Where(e => e.Time >= since).ToList();
+
+            var today = DateTime.UtcNow.Date;
+            var mitigatedToday = parsed.Count(e => e.Time.Date == today && (e.Action == "blocked" || e.Action == "BLOCK"));
+            var activeOrigins = recent.Select(e => e.Ip).Distinct().Count();
+
+            var vectors = recent.Count > 0
+                ? new[]
+                  {
+                      new
+                      {
+                          type = "HTTP Flood (Rate Limit)",
+                          count = recent.Count,
+                          mitigated = recent.Count(e => e.Action == "blocked" || e.Action == "BLOCK")
+                      }
+                  }
+                : Array.Empty<object>();
+
+            var trafficBuckets = await _clickHouse.GetTrafficSeriesAsync(since);
+            var hourlyRequests = trafficBuckets
+                .Where(b => DateTime.TryParse(b.Time, out _))
+                .ToDictionary(b => DateTime.Parse(b.Time), b => b.Requests);
+
+            var now = DateTime.UtcNow;
+            var timeline = Enumerable.Range(0, 24)
+                .Select(i => new DateTime(now.Year, now.Month, now.Day, now.Hour, 0, 0, DateTimeKind.Utc).AddHours(-(23 - i)))
+                .Select(hourStart =>
+                {
+                    var attack = recent.Count(e => e.Time >= hourStart && e.Time < hourStart.AddHours(1));
+                    var totalReq = hourlyRequests.TryGetValue(hourStart, out var r) ? r : 0;
+                    return new { time = hourStart.ToString("HH:00"), legitimate = Math.Max(0, totalReq - attack), attack };
+                })
+                .ToArray();
+
+            var recentAttacks = recent
+                .OrderByDescending(e => e.Time)
+                .Take(10)
+                .Select(e => new
+                {
+                    vector = "Rate Limit Flood",
+                    time = e.Time.ToString("HH:mm:ss"),
+                    duration = (string?)null,
+                    status = (e.Action == "blocked" || e.Action == "BLOCK") ? "Mitigated" : "Detected",
+                    peakBps = (string?)null,
+                    peakPps = (string?)null,
+                })
+                .ToArray();
+
+            return Ok(new
+            {
+                mitigated = mitigatedToday,
+                activeOrigins,
+                vectors,
+                timeline,
+                recentAttacks,
             });
         }
 
