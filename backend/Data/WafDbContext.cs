@@ -55,6 +55,9 @@ namespace AffiniSecurity.Waf.Data
         public DbSet<RuleSetTemplate> RuleSetTemplates { get; set; }
         public DbSet<DataResidencyZone> DataResidencyZones { get; set; }
         public DbSet<DataResidencyAssignment> DataResidencyAssignments { get; set; }
+        public DbSet<DataProcessingRecord> DataProcessingRecords { get; set; }
+        public DbSet<IncidentClock> IncidentClocks { get; set; }
+        public DbSet<KeyCustodyRecord> KeyCustodyRecords { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

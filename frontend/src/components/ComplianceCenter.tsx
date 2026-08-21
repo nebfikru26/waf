@@ -1,12 +1,14 @@
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Shield, Scale, Gavel, History, CheckCircle2, AlertTriangle, RefreshCw, Lock, Download, Info, Loader2, BadgeCheck, FileJson, MapPin, Search, ShieldAlert, Clock } from "lucide-react";
+import { Shield, Scale, Gavel, History, CheckCircle2, AlertTriangle, RefreshCw, Lock, Download, Info, Loader2, BadgeCheck, FileJson, MapPin, Search, ShieldAlert, Clock, Timer, ClipboardList, KeyRound, PackageCheck, Plus, CheckCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 
 interface ComplianceProclamation {
@@ -42,6 +44,7 @@ interface ResidencyZone {
     facilityProvider?: string;
     isInCountry: boolean;
     isDefault: boolean;
+    allowedDataClasses: string;
     tenantCount: number;
 }
 
@@ -76,6 +79,46 @@ interface ResidencyHistoryEntry {
     reason?: string;
     changedByEmail?: string;
     changedAt: string;
+}
+
+interface IncidentClock {
+    id: string;
+    tenantId: string;
+    title: string;
+    severity: string;
+    status: string;
+    detectedAt: string;
+    certDeadline: string;
+    reportedToCertAt?: string;
+    breachDeadline: string;
+    reportedAsBreachAt?: string;
+    resolvedAt?: string;
+    notes?: string;
+}
+
+interface ProcessingRecord {
+    id: string;
+    tenantId: string;
+    purpose: string;
+    dataCategories: string;
+    legalBasis: string;
+    retentionPeriod: string;
+    subProcessors?: string;
+    dpiaRequired: boolean;
+    dpiaSummary?: string;
+    dpiaCompletedAt?: string;
+    updatedAt: string;
+}
+
+interface KeyCustodyRecord {
+    id: string;
+    tenantId?: string;
+    scope: string;
+    keyManagementSystem: string;
+    isInCountry: boolean;
+    custodian?: string;
+    verifiedAt?: string;
+    createdAt: string;
 }
 
 const Label = ({ children, className }: { children: React.ReactNode; className?: string }) => (
@@ -192,6 +235,127 @@ export const ComplianceCenter = () => {
         const q = residencySearch.toLowerCase();
         return rows.filter(t => t.tenantName?.toLowerCase().includes(q) || t.industry?.toLowerCase().includes(q));
     }, [sovereignty, residencySearch]);
+
+    // --- Incident Reporting Clocks (48h CERT / 72h breach SLAs) ---
+    const { data: incidents, isLoading: isIncidentsLoading } = useQuery<IncidentClock[]>({
+        queryKey: ["incident-clocks"],
+        queryFn: () => fetch("/api/compliance/incidents", { headers }).then(r => r.json()),
+        refetchInterval: 60_000
+    });
+
+    const reportCert = useMutation({
+        mutationFn: async (id: string) => {
+            const res = await fetch(`/api/compliance/incidents/${id}/report-cert`, { method: "POST", headers, body: JSON.stringify({}) });
+            if (!res.ok) throw new Error("Failed to report to CERT");
+            return res.json();
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["incident-clocks"] });
+            toast({ title: "Reported to National CERT", description: "48-hour deadline satisfied and logged." });
+        }
+    });
+
+    const reportBreach = useMutation({
+        mutationFn: async (id: string) => {
+            const res = await fetch(`/api/compliance/incidents/${id}/report-breach`, { method: "POST", headers, body: JSON.stringify({}) });
+            if (!res.ok) throw new Error("Failed to report breach");
+            return res.json();
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["incident-clocks"] });
+            toast({ title: "Breach Notification Filed", description: "72-hour deadline satisfied and logged." });
+        }
+    });
+
+    const resolveIncident = useMutation({
+        mutationFn: async (id: string) => {
+            const res = await fetch(`/api/compliance/incidents/${id}/resolve`, { method: "POST", headers, body: JSON.stringify({}) });
+            if (!res.ok) throw new Error("Failed to resolve incident");
+            return res.json();
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["incident-clocks"] });
+            toast({ title: "Incident Resolved" });
+        }
+    });
+
+    const openIncidents = useMemo(() => (incidents ?? []).filter(i => i.status !== "Resolved"), [incidents]);
+
+    const deadlineBadge = (deadline: string, reportedAt?: string) => {
+        if (reportedAt) return <Badge variant="outline" className="text-[10px] gap-1 border-green-500/30 text-green-500 bg-green-500/10"><CheckCircle2 className="h-3 w-3" /> Reported</Badge>;
+        const msLeft = new Date(deadline).getTime() - Date.now();
+        const hoursLeft = msLeft / 3_600_000;
+        if (msLeft <= 0) return <Badge variant="outline" className="text-[10px] gap-1 border-destructive/30 text-destructive bg-destructive/10"><AlertTriangle className="h-3 w-3" /> Overdue</Badge>;
+        const urgent = hoursLeft < 6;
+        return (
+            <Badge variant="outline" className={`text-[10px] gap-1 ${urgent ? "border-amber-500/30 text-amber-500 bg-amber-500/10" : "border-border text-muted-foreground"}`}>
+                <Timer className="h-3 w-3" /> {hoursLeft.toFixed(1)}h left
+            </Badge>
+        );
+    };
+
+    // --- Data Processing Register + DPIA ---
+    const [registerTenantId, setRegisterTenantId] = useState("");
+    const [showRegisterForm, setShowRegisterForm] = useState(false);
+    const { data: processingRegister, isLoading: isRegisterLoading } = useQuery<ProcessingRecord[]>({
+        queryKey: ["processing-register"],
+        queryFn: () => fetch("/api/compliance/processing-register", { headers }).then(r => r.json())
+    });
+
+    const createRecord = useMutation({
+        mutationFn: async (payload: Record<string, unknown>) => {
+            const res = await fetch("/api/compliance/processing-register", { method: "POST", headers, body: JSON.stringify(payload) });
+            if (!res.ok) throw new Error("Failed to create processing record");
+            return res.json();
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["processing-register"] });
+            setShowRegisterForm(false);
+            toast({ title: "Processing Record Added", description: "Entry recorded in the Article 30-style register." });
+        }
+    });
+
+    // --- Key Custody ---
+    const { data: keyCustody, isLoading: isKeyCustodyLoading } = useQuery<KeyCustodyRecord[]>({
+        queryKey: ["key-custody"],
+        queryFn: () => fetch("/api/compliance/key-custody", { headers }).then(r => r.json())
+    });
+
+    const verifyKeyCustody = useMutation({
+        mutationFn: async (id: string) => {
+            const res = await fetch(`/api/compliance/key-custody/${id}/verify`, { method: "POST", headers });
+            if (!res.ok) throw new Error("Verification failed");
+            return res.json();
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["key-custody"] });
+            toast({ title: "Key Custody Verified" });
+        }
+    });
+
+    // --- Certified Audit Package Export ---
+    const [isExportingPackage, setIsExportingPackage] = useState(false);
+    const handleAuditPackageExport = async () => {
+        setIsExportingPackage(true);
+        try {
+            const res = await fetch("/api/compliance/audit-package/export", { headers });
+            if (!res.ok) throw new Error("Export failed");
+            const blob = await res.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `INSA_Audit_Package_${new Date().toISOString().split("T")[0]}.zip`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+            toast({ title: "Audit Package Ready", description: "Bundle exported for a certified third-party auditor." });
+        } catch {
+            toast({ title: "Export Failed", variant: "destructive" });
+        } finally {
+            setIsExportingPackage(false);
+        }
+    };
 
     if (isLoading) return <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
 
@@ -414,8 +578,9 @@ export const ComplianceCenter = () => {
                 {/* Zone catalog */}
                 <div className="flex flex-wrap gap-2">
                     {sovereignty?.zones.map(z => (
-                        <div key={z.code} className={`px-3 py-1.5 rounded-full flex items-center gap-2 text-[10px] font-bold uppercase font-mono border ${z.isInCountry ? "bg-green-500/10 border-green-500/30 text-green-500" : "bg-amber-500/10 border-amber-500/30 text-amber-500"}`}>
-                            <MapPin className="h-3 w-3" /> {z.name} · {z.tenantCount}
+                        <div key={z.code} className={`px-3 py-1.5 rounded-full flex flex-col gap-0.5 text-[10px] font-bold uppercase font-mono border ${z.isInCountry ? "bg-green-500/10 border-green-500/30 text-green-500" : "bg-amber-500/10 border-amber-500/30 text-amber-500"}`}>
+                            <span className="flex items-center gap-2"><MapPin className="h-3 w-3" /> {z.name} · {z.tenantCount}</span>
+                            <span className="font-normal normal-case text-[9px] opacity-70">{z.allowedDataClasses}</span>
                         </div>
                     ))}
                 </div>
@@ -496,7 +661,236 @@ export const ComplianceCenter = () => {
                 </div>
             </div>
 
-            {/* Residency change history dialog */}
+            {/* Incident Reporting Clocks: 48h CERT / 72h Breach SLAs */}
+            <div className="bg-card border border-border rounded-2xl p-6 space-y-5">
+                <div className="space-y-1">
+                    <h3 className="text-lg font-bold flex items-center gap-2 font-mono uppercase tracking-tighter">
+                        <Timer className="h-5 w-5 text-primary" /> Incident Reporting Clocks
+                    </h3>
+                    <p className="text-[11px] text-muted-foreground">
+                        Auto-opened for every CRITICAL alert. National CERT notification is due within 48 hours
+                        (Critical Infrastructure Cybersecurity Proclamation 1426/2026); personal-data breach
+                        notification is due within 72 hours (Data Protection Proclamation 1321/2024).
+                    </p>
+                </div>
+
+                <div className="border border-border/50 rounded-xl overflow-hidden">
+                    <Table>
+                        <TableHeader>
+                            <TableRow>
+                                <TableHead className="text-[10px] uppercase">Incident</TableHead>
+                                <TableHead className="text-[10px] uppercase">Tenant</TableHead>
+                                <TableHead className="text-[10px] uppercase">CERT (48h)</TableHead>
+                                <TableHead className="text-[10px] uppercase">Breach (72h)</TableHead>
+                                <TableHead className="text-[10px] uppercase text-right">Actions</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {isIncidentsLoading && (
+                                <TableRow><TableCell colSpan={5} className="text-center py-8"><Loader2 className="h-5 w-5 animate-spin mx-auto text-primary" /></TableCell></TableRow>
+                            )}
+                            {!isIncidentsLoading && openIncidents.length === 0 && (
+                                <TableRow><TableCell colSpan={5} className="text-center py-8 text-xs text-muted-foreground">No open incidents. All reporting clocks are clear.</TableCell></TableRow>
+                            )}
+                            {openIncidents.map(i => (
+                                <TableRow key={i.id}>
+                                    <TableCell className="text-xs font-medium max-w-xs truncate">{i.title}</TableCell>
+                                    <TableCell className="text-xs text-muted-foreground">{i.tenantId}</TableCell>
+                                    <TableCell>{deadlineBadge(i.certDeadline, i.reportedToCertAt)}</TableCell>
+                                    <TableCell>{deadlineBadge(i.breachDeadline, i.reportedAsBreachAt)}</TableCell>
+                                    <TableCell className="text-right space-x-1">
+                                        {!i.reportedToCertAt && (
+                                            <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={() => reportCert.mutate(i.id)} disabled={reportCert.isPending}>Report CERT</Button>
+                                        )}
+                                        {!i.reportedAsBreachAt && (
+                                            <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={() => reportBreach.mutate(i.id)} disabled={reportBreach.isPending}>Report Breach</Button>
+                                        )}
+                                        <Button size="sm" variant="outline" className="h-7 text-[10px] gap-1" onClick={() => resolveIncident.mutate(i.id)} disabled={resolveIncident.isPending}>
+                                            <CheckCheck className="h-3 w-3" /> Resolve
+                                        </Button>
+                                    </TableCell>
+                                </TableRow>
+                            ))}
+                        </TableBody>
+                    </Table>
+                </div>
+            </div>
+
+            {/* Data Processing Register + DPIA */}
+            <div className="bg-card border border-border rounded-2xl p-6 space-y-5">
+                <div className="flex flex-col md:flex-row justify-between gap-4">
+                    <div className="space-y-1">
+                        <h3 className="text-lg font-bold flex items-center gap-2 font-mono uppercase tracking-tighter">
+                            <ClipboardList className="h-5 w-5 text-primary" /> Data Processing Register
+                        </h3>
+                        <p className="text-[11px] text-muted-foreground">
+                            Per-tenant record of processing purpose, legal basis, retention, and DPIA status —
+                            satisfies the processing-register obligation of Proclamation 1321/2024.
+                        </p>
+                    </div>
+                    <Button size="sm" variant="outline" className="h-8 text-[10px] gap-1 w-fit" onClick={() => setShowRegisterForm(v => !v)}>
+                        <Plus className="h-3.5 w-3.5" /> Add Record
+                    </Button>
+                </div>
+
+                {showRegisterForm && (
+                    <form
+                        className="grid grid-cols-1 md:grid-cols-2 gap-3 p-4 bg-muted/10 border border-border/50 rounded-xl"
+                        onSubmit={(e) => {
+                            e.preventDefault();
+                            const form = e.currentTarget;
+                            const data = new FormData(form);
+                            createRecord.mutate({
+                                tenantId: data.get("tenantId"),
+                                purpose: data.get("purpose"),
+                                dataCategories: data.get("dataCategories"),
+                                legalBasis: data.get("legalBasis"),
+                                retentionPeriod: data.get("retentionPeriod"),
+                                subProcessors: data.get("subProcessors"),
+                                dpiaRequired: data.get("dpiaRequired") === "on",
+                                dpiaSummary: data.get("dpiaSummary")
+                            });
+                            form.reset();
+                        }}
+                    >
+                        <Input name="tenantId" placeholder="Tenant ID" required className="text-xs" value={registerTenantId} onChange={e => setRegisterTenantId(e.target.value)} />
+                        <Input name="purpose" placeholder="Processing purpose (e.g. Fraud detection)" required className="text-xs" />
+                        <Input name="dataCategories" placeholder="Data categories (PII,Financial,...)" className="text-xs" />
+                        <Select name="legalBasis" defaultValue="Contract">
+                            <SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="Consent" className="text-xs">Consent</SelectItem>
+                                <SelectItem value="Contract" className="text-xs">Contract</SelectItem>
+                                <SelectItem value="Legal Obligation" className="text-xs">Legal Obligation</SelectItem>
+                                <SelectItem value="Legitimate Interest" className="text-xs">Legitimate Interest</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <Input name="retentionPeriod" placeholder="Retention (e.g. 365 Days)" defaultValue="365 Days" className="text-xs" />
+                        <Input name="subProcessors" placeholder="Sub-processors (optional)" className="text-xs" />
+                        <div className="flex items-center gap-2 md:col-span-2">
+                            <Checkbox id="dpiaRequired" name="dpiaRequired" />
+                            <label htmlFor="dpiaRequired" className="text-xs">DPIA required for this processing activity</label>
+                        </div>
+                        <Textarea name="dpiaSummary" placeholder="DPIA summary / risk mitigation notes (optional)" className="text-xs md:col-span-2" rows={2} />
+                        <div className="md:col-span-2 flex justify-end gap-2">
+                            <Button type="button" size="sm" variant="ghost" className="h-8 text-[10px]" onClick={() => setShowRegisterForm(false)}>Cancel</Button>
+                            <Button type="submit" size="sm" className="h-8 text-[10px]" disabled={createRecord.isPending}>
+                                {createRecord.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save Record"}
+                            </Button>
+                        </div>
+                    </form>
+                )}
+
+                <div className="border border-border/50 rounded-xl overflow-hidden">
+                    <Table>
+                        <TableHeader>
+                            <TableRow>
+                                <TableHead className="text-[10px] uppercase">Tenant</TableHead>
+                                <TableHead className="text-[10px] uppercase">Purpose</TableHead>
+                                <TableHead className="text-[10px] uppercase">Legal Basis</TableHead>
+                                <TableHead className="text-[10px] uppercase">Retention</TableHead>
+                                <TableHead className="text-[10px] uppercase">DPIA</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {isRegisterLoading && (
+                                <TableRow><TableCell colSpan={5} className="text-center py-8"><Loader2 className="h-5 w-5 animate-spin mx-auto text-primary" /></TableCell></TableRow>
+                            )}
+                            {!isRegisterLoading && (processingRegister?.length ?? 0) === 0 && (
+                                <TableRow><TableCell colSpan={5} className="text-center py-8 text-xs text-muted-foreground">No processing records yet. Add one to start the register.</TableCell></TableRow>
+                            )}
+                            {processingRegister?.map(r => (
+                                <TableRow key={r.id}>
+                                    <TableCell className="text-xs font-medium">{r.tenantId}</TableCell>
+                                    <TableCell className="text-xs text-muted-foreground max-w-xs truncate">{r.purpose}</TableCell>
+                                    <TableCell className="text-xs">{r.legalBasis}</TableCell>
+                                    <TableCell className="text-xs">{r.retentionPeriod}</TableCell>
+                                    <TableCell>
+                                        {!r.dpiaRequired ? (
+                                            <span className="text-[10px] text-muted-foreground">N/A</span>
+                                        ) : r.dpiaCompletedAt ? (
+                                            <Badge variant="outline" className="text-[10px] gap-1 border-green-500/30 text-green-500 bg-green-500/10"><CheckCircle2 className="h-3 w-3" /> Complete</Badge>
+                                        ) : (
+                                            <Badge variant="outline" className="text-[10px] gap-1 border-amber-500/30 text-amber-500 bg-amber-500/10"><AlertTriangle className="h-3 w-3" /> Pending</Badge>
+                                        )}
+                                    </TableCell>
+                                </TableRow>
+                            ))}
+                        </TableBody>
+                    </Table>
+                </div>
+            </div>
+
+            {/* Key Custody + Certified Audit Package Export */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="lg:col-span-2 bg-card border border-border rounded-2xl p-6 space-y-5">
+                    <div className="space-y-1">
+                        <h3 className="text-lg font-bold flex items-center gap-2 font-mono uppercase tracking-tighter">
+                            <KeyRound className="h-5 w-5 text-primary" /> Encryption Key Custody
+                        </h3>
+                        <p className="text-[11px] text-muted-foreground">
+                            Data residing in-country still fails a sovereignty review if its decryption key is
+                            held by a foreign KMS. This tracks where every key actually lives.
+                        </p>
+                    </div>
+                    <div className="border border-border/50 rounded-xl overflow-hidden">
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead className="text-[10px] uppercase">Scope</TableHead>
+                                    <TableHead className="text-[10px] uppercase">Key Management System</TableHead>
+                                    <TableHead className="text-[10px] uppercase">Custody</TableHead>
+                                    <TableHead className="text-[10px] uppercase text-right">Verify</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {isKeyCustodyLoading && (
+                                    <TableRow><TableCell colSpan={4} className="text-center py-8"><Loader2 className="h-5 w-5 animate-spin mx-auto text-primary" /></TableCell></TableRow>
+                                )}
+                                {keyCustody?.map(k => (
+                                    <TableRow key={k.id}>
+                                        <TableCell className="text-xs font-medium">{k.scope}</TableCell>
+                                        <TableCell className="text-xs text-muted-foreground">{k.keyManagementSystem}</TableCell>
+                                        <TableCell>
+                                            {k.isInCountry ? (
+                                                <Badge variant="outline" className="text-[10px] gap-1 border-green-500/30 text-green-500 bg-green-500/10">🇪🇹 In-Country</Badge>
+                                            ) : (
+                                                <Badge variant="outline" className="text-[10px] gap-1 border-amber-500/30 text-amber-500 bg-amber-500/10">🌐 Foreign</Badge>
+                                            )}
+                                        </TableCell>
+                                        <TableCell className="text-right">
+                                            <Button size="sm" variant="ghost" className="h-7 text-[10px] gap-1" onClick={() => verifyKeyCustody.mutate(k.id)} disabled={verifyKeyCustody.isPending}>
+                                                <RefreshCw className="h-3 w-3" /> {k.verifiedAt ? new Date(k.verifiedAt).toLocaleDateString() : "Verify"}
+                                            </Button>
+                                        </TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    </div>
+                </div>
+
+                <div className="bg-card border border-border rounded-2xl p-6 space-y-4">
+                    <h3 className="text-lg font-bold flex items-center gap-2 font-mono uppercase tracking-tighter">
+                        <PackageCheck className="h-5 w-5 text-primary" /> Certified Audit Package
+                    </h3>
+                    <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        Bundles data residency overview, change history, incident reporting clocks, the
+                        processing register, key custody records, and audit-chain integrity proof into one
+                        ZIP — ready for an INSA-certified third-party auditor.
+                    </p>
+                    <Button
+                        className="w-full text-[10px] font-bold uppercase tracking-widest"
+                        variant="outline"
+                        onClick={handleAuditPackageExport}
+                        disabled={isExportingPackage}
+                    >
+                        {isExportingPackage ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Download className="h-4 w-4 mr-2 text-primary" />}
+                        Export Audit Package
+                    </Button>
+                </div>
+            </div>
+
             <Dialog open={!!historyTenant} onOpenChange={(open) => !open && setHistoryTenant(null)}>
                 <DialogContent className="max-w-lg">
                     <DialogHeader>

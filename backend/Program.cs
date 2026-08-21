@@ -35,11 +35,15 @@ builder.Services.AddSingleton<INatsService, NatsService>();
 builder.Services.AddSingleton<WafConfigGenerator>();
 builder.Services.AddSingleton<IClickHouseService, ClickHouseService>();
 builder.Services.AddScoped<IAuditService, ImmutableAuditService>();
+builder.Services.AddScoped<IDataSovereigntyService, DataSovereigntyService>();
+builder.Services.AddScoped<IIncidentClockService, IncidentClockService>();
 builder.Services.AddSingleton<IK8sCertManagerService, K8sCertManagerService>();
 builder.Services.AddSingleton<IGeoIpService, GeoIpService>();
 builder.Services.AddHostedService<CertbotBackgroundService>();
 builder.Services.AddHostedService<NatsLogIngester>();
 builder.Services.AddHostedService<AiHealthMonitorService>();
+builder.Services.AddHostedService<ComplianceDriftMonitorService>();
+builder.Services.AddHostedService<IncidentClockMonitorService>();
 
 // Register CrsDiscoveryService as a singleton so it can be injected by controllers,
 // and also add it as a HostedService to run in the background.

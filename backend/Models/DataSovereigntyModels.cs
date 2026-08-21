@@ -36,6 +36,14 @@ namespace AffiniSecurity.Waf.Models
         [JsonPropertyName("isInCountry")]
         public bool IsInCountry { get; set; } = true;
 
+        /// <summary>
+        /// Comma-separated data classes this zone may legally hold, e.g. "PII,Logs,Audit,Static,Cache".
+        /// Regulated tenants must be assigned to a zone whose classes include PII, Logs, and Audit.
+        /// Zones like a global CDN edge should only carry "Static,Cache" (no PII/regulated data).
+        /// </summary>
+        [JsonPropertyName("allowedDataClasses")]
+        public string AllowedDataClasses { get; set; } = "PII,Logs,Audit,Static,Cache";
+
         [JsonPropertyName("isDefault")]
         public bool IsDefault { get; set; } = false;
 

@@ -20,18 +20,18 @@ namespace AffiniSecurity.Waf.Controllers
         private readonly IClickHouseService _clickHouseService;
         private readonly INatsService _natsService;
         private readonly ITenantService _tenantService;
+        private readonly IDataSovereigntyService _sovereigntyService;
+        private readonly IIncidentClockService _incidentClockService;
 
-        // Sectors that Ethiopian law/regulators (NBE, INSA) treat as critical infrastructure
-        // and therefore require in-country data residency by default.
-        private static readonly string[] RegulatedIndustries = { "Banking", "Finance", "Government", "Telecom", "Insurance", "Healthcare" };
-
-        public ComplianceController(IAuditService auditService, WafDbContext context, IClickHouseService clickHouseService, INatsService natsService, ITenantService tenantService)
+        public ComplianceController(IAuditService auditService, WafDbContext context, IClickHouseService clickHouseService, INatsService natsService, ITenantService tenantService, IDataSovereigntyService sovereigntyService, IIncidentClockService incidentClockService)
         {
             _auditService = auditService;
             _context = context;
             _clickHouseService = clickHouseService;
             _natsService = natsService;
             _tenantService = tenantService;
+            _sovereigntyService = sovereigntyService;
+            _incidentClockService = incidentClockService;
         }
 
         [HttpGet("status")]
@@ -181,46 +181,11 @@ namespace AffiniSecurity.Waf.Controllers
         [HttpGet("data-sovereignty")]
         public async Task<IActionResult> GetDataSovereigntyOverview()
         {
-            var zones = await _context.DataResidencyZones.IgnoreQueryFilters()
-                .Where(z => z.IsActive)
-                .OrderByDescending(z => z.IsInCountry).ThenBy(z => z.Name)
-                .ToListAsync();
-            var zonesByCode = zones.ToDictionary(z => z.Code, z => z);
-
-            var tenants = await _context.Tenants.IgnoreQueryFilters()
-                .Select(t => new
-                {
-                    t.Id,
-                    t.Name,
-                    t.Industry,
-                    t.DataResidencyZoneCode,
-                    t.DataResidencyLastVerifiedAt
-                })
-                .ToListAsync();
-
-            var tenantRows = tenants.Select(t =>
-            {
-                var zoneCode = string.IsNullOrEmpty(t.DataResidencyZoneCode) ? "ET-ADDIS-DC1" : t.DataResidencyZoneCode;
-                zonesByCode.TryGetValue(zoneCode, out var zone);
-                var isInCountry = zone?.IsInCountry ?? false;
-                var requiresInCountry = RegulatedIndustries.Contains(t.Industry ?? string.Empty, StringComparer.OrdinalIgnoreCase);
-                return new
-                {
-                    tenantId = t.Id,
-                    tenantName = t.Name,
-                    industry = t.Industry,
-                    zoneCode,
-                    zoneName = zone?.Name ?? "Unknown Zone",
-                    isInCountry,
-                    requiresInCountry,
-                    isCompliant = !requiresInCountry || isInCountry,
-                    lastVerifiedAt = t.DataResidencyLastVerifiedAt
-                };
-            }).ToList();
+            var overview = await _sovereigntyService.GetOverviewAsync();
 
             return Ok(new
             {
-                Zones = zones.Select(z => new
+                Zones = overview.Zones.Select(z => new
                 {
                     z.Code,
                     z.Name,
@@ -228,15 +193,27 @@ namespace AffiniSecurity.Waf.Controllers
                     z.FacilityProvider,
                     z.IsInCountry,
                     z.IsDefault,
-                    TenantCount = tenantRows.Count(t => t.zoneCode == z.Code)
+                    z.AllowedDataClasses,
+                    TenantCount = overview.Tenants.Count(t => t.ZoneCode == z.Code)
                 }),
-                Tenants = tenantRows.OrderByDescending(t => !t.isCompliant).ThenBy(t => t.tenantName),
+                Tenants = overview.Tenants.Select(t => new
+                {
+                    tenantId = t.TenantId,
+                    tenantName = t.TenantName,
+                    industry = t.Industry,
+                    zoneCode = t.ZoneCode,
+                    zoneName = t.ZoneName,
+                    isInCountry = t.IsInCountry,
+                    requiresInCountry = t.RequiresInCountry,
+                    isCompliant = t.IsCompliant,
+                    lastVerifiedAt = t.LastVerifiedAt
+                }),
                 Summary = new
                 {
-                    TotalTenants = tenantRows.Count,
-                    InCountryCount = tenantRows.Count(t => t.isInCountry),
-                    RegulatedCount = tenantRows.Count(t => t.requiresInCountry),
-                    NonCompliantCount = tenantRows.Count(t => !t.isCompliant)
+                    TotalTenants = overview.TotalTenants,
+                    InCountryCount = overview.InCountryCount,
+                    RegulatedCount = overview.RegulatedCount,
+                    NonCompliantCount = overview.NonCompliantCount
                 }
             });
         }
@@ -257,6 +234,7 @@ namespace AffiniSecurity.Waf.Controllers
             public string CountryCode { get; set; } = "ET";
             public string? FacilityProvider { get; set; }
             public bool IsInCountry { get; set; } = true;
+            public string AllowedDataClasses { get; set; } = "PII,Logs,Audit,Static,Cache";
         }
 
         [HttpPost("data-sovereignty/zones")]
@@ -274,7 +252,8 @@ namespace AffiniSecurity.Waf.Controllers
                 Name = req.Name.Trim(),
                 CountryCode = string.IsNullOrWhiteSpace(req.CountryCode) ? "ET" : req.CountryCode,
                 FacilityProvider = req.FacilityProvider,
-                IsInCountry = req.IsInCountry
+                IsInCountry = req.IsInCountry,
+                AllowedDataClasses = string.IsNullOrWhiteSpace(req.AllowedDataClasses) ? "Static,Cache" : req.AllowedDataClasses
             };
             _context.DataResidencyZones.Add(zone);
             await _context.SaveChangesAsync();
@@ -307,10 +286,14 @@ namespace AffiniSecurity.Waf.Controllers
             var zone = await _context.DataResidencyZones.IgnoreQueryFilters().FirstOrDefaultAsync(z => z.Code == req.ZoneCode && z.IsActive);
             if (zone == null) return BadRequest(new { message = "Unknown or inactive residency zone." });
 
-            var requiresInCountry = RegulatedIndustries.Contains(tenant.Industry ?? string.Empty, StringComparer.OrdinalIgnoreCase);
-            if (requiresInCountry && !zone.IsInCountry && string.IsNullOrWhiteSpace(req.Reason))
+            var requiresInCountry = _sovereigntyService.RequiresInCountryResidency(tenant.Industry);
+            var zoneClasses = (zone.AllowedDataClasses ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var hasRegulatedClasses = _sovereigntyService.RegulatedDataClasses.All(c => zoneClasses.Contains(c, StringComparer.OrdinalIgnoreCase));
+
+            if (requiresInCountry && (!zone.IsInCountry || !hasRegulatedClasses) && string.IsNullOrWhiteSpace(req.Reason))
             {
-                return BadRequest(new { message = $"Tenant industry '{tenant.Industry}' requires in-country residency. Provide a documented exception reason to override." });
+                var problem = !zone.IsInCountry ? "is outside Ethiopia" : "does not permit PII/Logs/Audit data classes";
+                return BadRequest(new { message = $"Tenant industry '{tenant.Industry}' requires in-country residency for PII/Logs/Audit, but zone '{zone.Name}' {problem}. Provide a documented exception reason to override." });
             }
 
             var previousZoneCode = tenant.DataResidencyZoneCode;
@@ -348,6 +331,285 @@ namespace AffiniSecurity.Waf.Controllers
                 .ToListAsync();
 
             return Ok(history);
+        }
+
+        // ================================================================
+        // Incident Reporting Clocks: INSA CERT (48h) / Data Breach (72h) SLAs
+        // ================================================================
+
+        /// <summary>List incident clocks, optionally filtered by status (Open, CertReported, BreachReported, Resolved, Overdue).</summary>
+        [HttpGet("incidents")]
+        public async Task<IActionResult> GetIncidentClocks([FromQuery] string? status, [FromQuery] string? tenantId)
+        {
+            var query = _context.IncidentClocks.IgnoreQueryFilters().AsQueryable();
+            if (!string.IsNullOrEmpty(status)) query = query.Where(i => i.Status == status);
+            if (!string.IsNullOrEmpty(tenantId)) query = query.Where(i => i.TenantId == tenantId);
+
+            var clocks = await query.OrderByDescending(i => i.DetectedAt).Take(200).ToListAsync();
+            return Ok(clocks);
+        }
+
+        public class OpenIncidentRequest
+        {
+            public string TenantId { get; set; } = string.Empty;
+            public string Title { get; set; } = string.Empty;
+            public string Severity { get; set; } = "HIGH";
+        }
+
+        /// <summary>Manually open an incident clock (e.g. for an incident not surfaced by the WAF, like a physical breach or 3rd-party leak).</summary>
+        [HttpPost("incidents")]
+        public async Task<IActionResult> OpenIncident([FromBody] OpenIncidentRequest req)
+        {
+            if (string.IsNullOrWhiteSpace(req.TenantId) || string.IsNullOrWhiteSpace(req.Title))
+                return BadRequest(new { message = "tenantId and title are required." });
+
+            var clock = await _incidentClockService.OpenAsync(req.TenantId, req.Title, req.Severity);
+            await _auditService.LogActionAsync(null, _tenantService.UserEmail, "OPEN_INCIDENT_CLOCK", "IncidentClock", clock.Id, null, clock);
+            return Ok(clock);
+        }
+
+        public class ReportIncidentRequest
+        {
+            public string? Notes { get; set; }
+        }
+
+        /// <summary>Marks the incident as reported to the INSA National CERT (satisfies the 48h deadline).</summary>
+        [HttpPost("incidents/{id}/report-cert")]
+        public async Task<IActionResult> ReportIncidentToCert(string id, [FromBody] ReportIncidentRequest req)
+        {
+            var clock = await _incidentClockService.MarkCertReportedAsync(id, _tenantService.UserEmail);
+            if (clock == null) return NotFound();
+            await _auditService.LogActionAsync(null, _tenantService.UserEmail, "REPORT_INCIDENT_CERT", "IncidentClock", id, null, new { req.Notes });
+            return Ok(clock);
+        }
+
+        /// <summary>Marks the incident as reported as a personal-data breach (satisfies the 72h deadline).</summary>
+        [HttpPost("incidents/{id}/report-breach")]
+        public async Task<IActionResult> ReportIncidentAsBreach(string id, [FromBody] ReportIncidentRequest req)
+        {
+            var clock = await _incidentClockService.MarkBreachReportedAsync(id, _tenantService.UserEmail);
+            if (clock == null) return NotFound();
+            await _auditService.LogActionAsync(null, _tenantService.UserEmail, "REPORT_INCIDENT_BREACH", "IncidentClock", id, null, new { req.Notes });
+            return Ok(clock);
+        }
+
+        /// <summary>Closes out an incident clock once fully handled.</summary>
+        [HttpPost("incidents/{id}/resolve")]
+        public async Task<IActionResult> ResolveIncident(string id, [FromBody] ReportIncidentRequest req)
+        {
+            var clock = await _incidentClockService.ResolveAsync(id, req.Notes);
+            if (clock == null) return NotFound();
+            await _auditService.LogActionAsync(null, _tenantService.UserEmail, "RESOLVE_INCIDENT", "IncidentClock", id, null, new { req.Notes });
+            return Ok(clock);
+        }
+
+        // ================================================================
+        // Data Processing Register + DPIA (Proclamation 1321/2024 processing-register obligation)
+        // ================================================================
+
+        [HttpGet("processing-register")]
+        public async Task<IActionResult> GetProcessingRegister([FromQuery] string? tenantId)
+        {
+            var query = _context.DataProcessingRecords.IgnoreQueryFilters().AsQueryable();
+            if (!string.IsNullOrEmpty(tenantId)) query = query.Where(r => r.TenantId == tenantId);
+
+            var records = await query.OrderByDescending(r => r.UpdatedAt).ToListAsync();
+            return Ok(records);
+        }
+
+        public class ProcessingRecordRequest
+        {
+            public string TenantId { get; set; } = string.Empty;
+            public string Purpose { get; set; } = string.Empty;
+            public string DataCategories { get; set; } = string.Empty;
+            public string LegalBasis { get; set; } = "Contract";
+            public string RetentionPeriod { get; set; } = "365 Days";
+            public string? SubProcessors { get; set; }
+            public bool DpiaRequired { get; set; } = false;
+            public string? DpiaSummary { get; set; }
+        }
+
+        [HttpPost("processing-register")]
+        public async Task<IActionResult> CreateProcessingRecord([FromBody] ProcessingRecordRequest req)
+        {
+            if (string.IsNullOrWhiteSpace(req.TenantId) || string.IsNullOrWhiteSpace(req.Purpose))
+                return BadRequest(new { message = "tenantId and purpose are required." });
+
+            var record = new DataProcessingRecord
+            {
+                TenantId = req.TenantId,
+                Purpose = req.Purpose,
+                DataCategories = req.DataCategories,
+                LegalBasis = req.LegalBasis,
+                RetentionPeriod = req.RetentionPeriod,
+                SubProcessors = req.SubProcessors,
+                DpiaRequired = req.DpiaRequired,
+                DpiaSummary = req.DpiaSummary,
+                DpiaCompletedAt = !string.IsNullOrWhiteSpace(req.DpiaSummary) ? DateTime.UtcNow : null
+            };
+            _context.DataProcessingRecords.Add(record);
+            await _context.SaveChangesAsync();
+            await _auditService.LogActionAsync(null, _tenantService.UserEmail, "CREATE_PROCESSING_RECORD", "DataProcessingRecord", record.Id, null, record);
+
+            return Ok(record);
+        }
+
+        [HttpPut("processing-register/{id}")]
+        public async Task<IActionResult> UpdateProcessingRecord(string id, [FromBody] ProcessingRecordRequest req)
+        {
+            var record = await _context.DataProcessingRecords.IgnoreQueryFilters().FirstOrDefaultAsync(r => r.Id == id);
+            if (record == null) return NotFound();
+
+            var before = new { record.Purpose, record.DataCategories, record.LegalBasis, record.RetentionPeriod, record.SubProcessors, record.DpiaRequired, record.DpiaSummary };
+
+            record.Purpose = req.Purpose;
+            record.DataCategories = req.DataCategories;
+            record.LegalBasis = req.LegalBasis;
+            record.RetentionPeriod = req.RetentionPeriod;
+            record.SubProcessors = req.SubProcessors;
+            record.DpiaRequired = req.DpiaRequired;
+            if (!string.IsNullOrWhiteSpace(req.DpiaSummary) && record.DpiaSummary != req.DpiaSummary)
+            {
+                record.DpiaSummary = req.DpiaSummary;
+                record.DpiaCompletedAt = DateTime.UtcNow;
+            }
+            record.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+            await _auditService.LogActionAsync(null, _tenantService.UserEmail, "UPDATE_PROCESSING_RECORD", "DataProcessingRecord", id, before, record);
+
+            return Ok(record);
+        }
+
+        [HttpDelete("processing-register/{id}")]
+        public async Task<IActionResult> DeleteProcessingRecord(string id)
+        {
+            var record = await _context.DataProcessingRecords.IgnoreQueryFilters().FirstOrDefaultAsync(r => r.Id == id);
+            if (record == null) return NotFound();
+
+            _context.DataProcessingRecords.Remove(record);
+            await _context.SaveChangesAsync();
+            await _auditService.LogActionAsync(null, _tenantService.UserEmail, "DELETE_PROCESSING_RECORD", "DataProcessingRecord", id, record, null);
+
+            return Ok(new { deleted = true });
+        }
+
+        // ================================================================
+        // Key Custody: proves encryption keys — not just data — stay in-country
+        // ================================================================
+
+        [HttpGet("key-custody")]
+        public async Task<IActionResult> GetKeyCustodyRecords()
+        {
+            var records = await _context.KeyCustodyRecords.IgnoreQueryFilters().OrderBy(k => k.Scope).ToListAsync();
+            return Ok(records);
+        }
+
+        public class KeyCustodyRequest
+        {
+            public string? TenantId { get; set; }
+            public string Scope { get; set; } = string.Empty;
+            public string KeyManagementSystem { get; set; } = string.Empty;
+            public bool IsInCountry { get; set; } = true;
+            public string? Custodian { get; set; }
+        }
+
+        [HttpPost("key-custody")]
+        public async Task<IActionResult> CreateKeyCustodyRecord([FromBody] KeyCustodyRequest req)
+        {
+            if (string.IsNullOrWhiteSpace(req.Scope) || string.IsNullOrWhiteSpace(req.KeyManagementSystem))
+                return BadRequest(new { message = "scope and keyManagementSystem are required." });
+
+            var record = new KeyCustodyRecord
+            {
+                TenantId = req.TenantId,
+                Scope = req.Scope,
+                KeyManagementSystem = req.KeyManagementSystem,
+                IsInCountry = req.IsInCountry,
+                Custodian = req.Custodian
+            };
+            _context.KeyCustodyRecords.Add(record);
+            await _context.SaveChangesAsync();
+            await _auditService.LogActionAsync(null, _tenantService.UserEmail, "CREATE_KEY_CUSTODY_RECORD", "KeyCustodyRecord", record.Id, null, record);
+
+            return Ok(record);
+        }
+
+        [HttpPost("key-custody/{id}/verify")]
+        public async Task<IActionResult> VerifyKeyCustodyRecord(string id)
+        {
+            var record = await _context.KeyCustodyRecords.IgnoreQueryFilters().FirstOrDefaultAsync(k => k.Id == id);
+            if (record == null) return NotFound();
+
+            record.VerifiedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+            return Ok(record);
+        }
+
+        // ================================================================
+        // Certified Third-Party Audit Package: bundles every governance
+        // artifact into one export so an INSA-certified auditor can self-serve.
+        // ================================================================
+
+        [HttpGet("audit-package/export")]
+        public async Task<IActionResult> ExportAuditPackage()
+        {
+            try
+            {
+                var sovereignty = await _sovereigntyService.GetOverviewAsync();
+                var residencyHistory = await _context.DataResidencyAssignments.IgnoreQueryFilters().OrderByDescending(a => a.ChangedAt).Take(500).ToListAsync();
+                var incidents = await _context.IncidentClocks.IgnoreQueryFilters().OrderByDescending(i => i.DetectedAt).Take(500).ToListAsync();
+                var processingRegister = await _context.DataProcessingRecords.IgnoreQueryFilters().ToListAsync();
+                var keyCustody = await _context.KeyCustodyRecords.IgnoreQueryFilters().ToListAsync();
+                var auditIntact = await _auditService.VerifyIntegrityAsync();
+                var config = await _context.SystemConfigs.FirstOrDefaultAsync();
+
+                using var ms = new System.IO.MemoryStream();
+                using (var zip = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Create, true))
+                {
+                    void WriteJson(string name, object payload)
+                    {
+                        var entry = zip.CreateEntry(name, System.IO.Compression.CompressionLevel.Optimal);
+                        using var entryStream = entry.Open();
+                        using var writer = new System.IO.StreamWriter(entryStream);
+                        writer.Write(System.Text.Json.JsonSerializer.Serialize(payload, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                    }
+
+                    WriteJson("00_manifest.json", new
+                    {
+                        GeneratedAt = DateTime.UtcNow,
+                        Platform = "AffiniSecurity-WAF-v2026",
+                        CertificationNumber = config?.EcaCertificationNumber ?? "UNREGISTERED",
+                        Contents = new[] {
+                            "01_data_residency_overview.json",
+                            "02_residency_change_history.json",
+                            "03_incident_reporting_clocks.json",
+                            "04_data_processing_register.json",
+                            "05_key_custody_records.json",
+                            "06_audit_chain_integrity.json"
+                        }
+                    });
+                    WriteJson("01_data_residency_overview.json", sovereignty);
+                    WriteJson("02_residency_change_history.json", residencyHistory);
+                    WriteJson("03_incident_reporting_clocks.json", incidents);
+                    WriteJson("04_data_processing_register.json", processingRegister);
+                    WriteJson("05_key_custody_records.json", keyCustody);
+                    WriteJson("06_audit_chain_integrity.json", new
+                    {
+                        AuditIntegrity = auditIntact ? "VERIFIED" : "FAILURE",
+                        TotalLogs = await _context.AuditLogs.IgnoreQueryFilters().CountAsync(),
+                        IntegrityMechanism = "HMAC-SHA256-Chaining"
+                    });
+                }
+
+                await _auditService.LogActionAsync(null, _tenantService.UserEmail, "EXPORT_AUDIT_PACKAGE", "AuditPackage", "bundle", null, new { generatedAt = DateTime.UtcNow });
+
+                return File(ms.ToArray(), "application/zip", $"INSA_Audit_Package_{DateTime.UtcNow:yyyyMMdd}.zip");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AuditPackageExport] CRITICAL ERROR: {ex.Message}");
+                return StatusCode(500, new { message = "Failed to generate audit package", error = ex.Message });
+            }
         }
     }
 }
